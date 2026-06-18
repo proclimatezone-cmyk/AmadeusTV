@@ -8,11 +8,11 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: 'amadeusTV.vercel.app — IPTV Streaming',
+  title: 'Amadeus TV by MN',
   description: 'Мобильный IPTV плеер с доступом к тысячам каналов. Формула 1, спорт, кино и новости — всё в одном месте.',
   keywords: 'iptv, streaming, formula 1, f1, tv, amadeus tv, live tv',
   openGraph: {
-    title: 'amadeusTV.vercel.app',
+    title: 'Amadeus TV by MN',
     description: 'Смотри ТВ каналы откуда угодно. F1, спорт, кино — бесплатно.',
     type: 'website',
   },
