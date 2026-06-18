@@ -34,10 +34,9 @@ export async function GET(request: NextRequest) {
         return NextResponse.json({ countries }, { headers: responseHeaders });
       }
 
-      case 'f1': {
-        const language = searchParams.get('language') || undefined;
-        const channels = getF1Channels(language);
-        return NextResponse.json({ channels, total: channels.length }, { headers: responseHeaders });
+      case 'all': {
+        const result = getChannels({ limit: 15000 });
+        return NextResponse.json({ channels: result.channels }, { headers: responseHeaders });
       }
 
       case 'list':

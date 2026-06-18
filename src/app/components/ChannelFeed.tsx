@@ -1,7 +1,7 @@
 'use client';
 
-import { useState, useCallback, useEffect, useRef } from 'react';
-import { Channel, ChannelCategory } from '@/lib/types';
+import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
+import { Channel, ChannelCategory, normalizeLanguage, normalizeCountry } from '@/lib/types';
 import ChannelPlayer from './ChannelPlayer';
 import ChannelOverlay from './ChannelOverlay';
 import FilterSheet from './FilterSheet';
@@ -25,9 +25,14 @@ export default function ChannelFeed({ initialChannels, categories }: ChannelFeed
   const [activeCountry, setActiveCountry] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
   
-  // Lists loaded from API
-  const [languages, setLanguages] = useState<{ code: string; name: string; count: number }[]>([]);
-  const [countries, setCountries] = useState<{ code: string; name: string; count: number }[]>([]);
+  // Client-side caching database for 0ms lag
+  const [allChannels, setAllChannels] = useState<Channel[]>([]);
+  const [isLoaded, setIsLoaded] = useState(false);
+  const [clientPage, setClientPage] = useState(1);
+
+  // Lists loaded from API as fallback
+  const [languagesState, setLanguagesState] = useState<{ code: string; name: string; count: number }[]>([]);
+  const [countriesState, setCountriesState] = useState<{ code: string; name: string; count: number }[]>([]);
   
   // LocalStorage lists
   const [favorites, setFavorites] = useState<Channel[]>([]);
@@ -57,6 +62,107 @@ export default function ChannelFeed({ initialChannels, categories }: ChannelFeed
   const pageRef = useRef(1);
   const hasMoreRef = useRef(true);
 
+  // Compute languages and countries locally if the database is loaded
+  const languages = useMemo(() => {
+    if (!isLoaded || allChannels.length === 0) {
+      return languagesState;
+    }
+    let filtered = allChannels;
+    if (activeCategory !== 'all') {
+      filtered = filtered.filter(ch => ch.group === activeCategory);
+    }
+    const langCounts = new Map<string, number>();
+    for (const ch of filtered) {
+      const code = ch.langCode || 'xx';
+      langCounts.set(code, (langCounts.get(code) || 0) + 1);
+    }
+    return Array.from(langCounts.entries())
+      .map(([code, count]) => ({
+        code,
+        name: normalizeLanguage(code),
+        count,
+      }))
+      .sort((a, b) => {
+        if (a.code === 'ru') return -1;
+        if (b.code === 'ru') return 1;
+        if (a.code === 'en') return -1;
+        if (b.code === 'en') return 1;
+        return b.count - a.count;
+      });
+  }, [isLoaded, allChannels, activeCategory, languagesState]);
+
+  const countries = useMemo(() => {
+    if (!isLoaded || allChannels.length === 0) {
+      return countriesState;
+    }
+    let filtered = allChannels;
+    if (activeCategory !== 'all') {
+      filtered = filtered.filter(ch => ch.group === activeCategory);
+    }
+    const countryCounts = new Map<string, number>();
+    for (const ch of filtered) {
+      const code = ch.country?.toLowerCase() || '';
+      if (!code) continue;
+      countryCounts.set(code, (countryCounts.get(code) || 0) + 1);
+    }
+    return Array.from(countryCounts.entries())
+      .map(([code, count]) => ({
+        code,
+        name: normalizeCountry(code),
+        count,
+      }))
+      .sort((a, b) => {
+        if (a.code === 'ru') return -1;
+        if (b.code === 'ru') return 1;
+        if (a.code === 'us') return -1;
+        if (b.code === 'us') return 1;
+        if (a.code === 'gb') return -1;
+        if (b.code === 'gb') return 1;
+        return b.count - a.count;
+      });
+  }, [isLoaded, allChannels, activeCategory, countriesState]);
+
+  // Locally filtered channels
+  const clientFilteredChannels = useMemo(() => {
+    if (!isLoaded || allChannels.length === 0) return [];
+    let filtered = allChannels;
+
+    if (activeCategory !== 'all') {
+      filtered = filtered.filter(ch => ch.group === activeCategory);
+    }
+    if (activeLanguage !== 'all') {
+      filtered = filtered.filter(ch => ch.langCode === activeLanguage);
+    }
+    if (activeCountry !== 'all') {
+      filtered = filtered.filter(ch => ch.country?.toLowerCase() === activeCountry.toLowerCase());
+    }
+    if (searchQuery) {
+      const q = searchQuery.toLowerCase();
+      filtered = filtered.filter(ch => ch.name.toLowerCase().includes(q));
+    }
+
+    // Sort Russian first, then by name
+    return [...filtered].sort((a, b) => {
+      const aRu = a.langCode === 'ru' ? 0 : 1;
+      const bRu = b.langCode === 'ru' ? 0 : 1;
+      if (aRu !== bRu) return aRu - bRu;
+      return a.name.localeCompare(b.name);
+    });
+  }, [isLoaded, allChannels, activeCategory, activeLanguage, activeCountry, searchQuery]);
+
+  // Displayed channels under Tab 'all'
+  const displayedAllChannels = useMemo(() => {
+    if (!isLoaded) {
+      return channels;
+    }
+    return clientFilteredChannels.slice(0, clientPage * 40);
+  }, [isLoaded, channels, clientFilteredChannels, clientPage]);
+
+  // Pagination flag
+  const hasMore = isLoaded 
+    ? (clientPage * 40) < clientFilteredChannels.length 
+    : hasMoreRef.current;
+
   // Sync favorites, history, custom channels & options on mount
   useEffect(() => {
     const savedFavs = localStorage.getItem('amadeus_favorites');
@@ -72,7 +178,25 @@ export default function ChannelFeed({ initialChannels, categories }: ChannelFeed
     if (savedForceProxy) setForceProxy(savedForceProxy === 'true');
   }, []);
 
-  // Fetch channels from API
+  // Load entire channel database in background for offline instant filtering
+  useEffect(() => {
+    async function loadAllChannels() {
+      try {
+        const res = await fetch('/api/channels?action=all');
+        if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
+        const data = await res.json();
+        if (data.channels && Array.isArray(data.channels)) {
+          setAllChannels(data.channels);
+          setIsLoaded(true);
+        }
+      } catch (err) {
+        console.error('Failed to load all channels in background:', err);
+      }
+    }
+    loadAllChannels();
+  }, []);
+
+  // Fetch channels from API (fallback before background cache is loaded)
   const fetchChannels = useCallback(async (
     category: string,
     language: string,
@@ -110,20 +234,20 @@ export default function ChannelFeed({ initialChannels, categories }: ChannelFeed
     }
   }, []);
 
-  // Fetch meta options (languages and countries)
+  // Fetch meta options (languages and countries) (fallback)
   const fetchMeta = useCallback(async (category: string) => {
     try {
       const langParams = new URLSearchParams({ action: 'languages' });
       if (category !== 'all') langParams.set('category', category);
       const langRes = await fetch(`/api/channels?${langParams}`);
       const langData = await langRes.json();
-      setLanguages(langData.languages || []);
+      setLanguagesState(langData.languages || []);
 
       const countryParams = new URLSearchParams({ action: 'countries' });
       if (category !== 'all') countryParams.set('category', category);
       const countryRes = await fetch(`/api/channels?${countryParams}`);
       const countryData = await countryRes.json();
-      setCountries(countryData.countries || []);
+      setCountriesState(countryData.countries || []);
     } catch (err) {
       console.error('Failed to fetch meta parameters:', err);
     }
@@ -139,34 +263,58 @@ export default function ChannelFeed({ initialChannels, categories }: ChannelFeed
     setActiveCategory(slug);
     setActiveLanguage('all');
     setActiveCountry('all');
-    pageRef.current = 1;
-    fetchChannels(slug, 'all', 'all', searchQuery, 1);
+    
+    if (isLoaded) {
+      setClientPage(1);
+      setActiveIndex(0);
+    } else {
+      pageRef.current = 1;
+      fetchChannels(slug, 'all', 'all', searchQuery, 1);
+    }
   };
 
   const handleLanguageChange = (code: string) => {
     setActiveLanguage(code);
-    pageRef.current = 1;
-    fetchChannels(activeCategory, code, activeCountry, searchQuery, 1);
+    
+    if (isLoaded) {
+      setClientPage(1);
+      setActiveIndex(0);
+    } else {
+      pageRef.current = 1;
+      fetchChannels(activeCategory, code, activeCountry, searchQuery, 1);
+    }
   };
 
   const handleCountryChange = (code: string) => {
     setActiveCountry(code);
-    pageRef.current = 1;
-    fetchChannels(activeCategory, activeLanguage, code, searchQuery, 1);
+    
+    if (isLoaded) {
+      setClientPage(1);
+      setActiveIndex(0);
+    } else {
+      pageRef.current = 1;
+      fetchChannels(activeCategory, activeLanguage, code, searchQuery, 1);
+    }
   };
 
   const handleSearchChange = (query: string) => {
     setSearchQuery(query);
-    pageRef.current = 1;
     
-    if (searchTimeoutRef.current) {
-      clearTimeout(searchTimeoutRef.current);
-    }
-    
-    if (activeTab === 'all') {
-      searchTimeoutRef.current = setTimeout(() => {
-        fetchChannels(activeCategory, activeLanguage, activeCountry, query, 1);
-      }, 400);
+    if (isLoaded) {
+      setClientPage(1);
+      setActiveIndex(0);
+    } else {
+      pageRef.current = 1;
+      
+      if (searchTimeoutRef.current) {
+        clearTimeout(searchTimeoutRef.current);
+      }
+      
+      if (activeTab === 'all') {
+        searchTimeoutRef.current = setTimeout(() => {
+          fetchChannels(activeCategory, activeLanguage, activeCountry, query, 1);
+        }, 400);
+      }
     }
   };
 
@@ -175,14 +323,24 @@ export default function ChannelFeed({ initialChannels, categories }: ChannelFeed
     setActiveLanguage('all');
     setActiveCountry('all');
     setSearchQuery('');
-    pageRef.current = 1;
-    fetchChannels('all', 'all', 'all', '', 1);
+    
+    if (isLoaded) {
+      setClientPage(1);
+      setActiveIndex(0);
+    } else {
+      pageRef.current = 1;
+      fetchChannels('all', 'all', 'all', '', 1);
+    }
   };
 
   const handleLoadMore = () => {
-    if (hasMoreRef.current && !loading) {
-      pageRef.current++;
-      fetchChannels(activeCategory, activeLanguage, activeCountry, searchQuery, pageRef.current, true);
+    if (isLoaded) {
+      setClientPage(prev => prev + 1);
+    } else {
+      if (hasMoreRef.current && !loading) {
+        pageRef.current++;
+        fetchChannels(activeCategory, activeLanguage, activeCountry, searchQuery, pageRef.current, true);
+      }
     }
   };
 
@@ -341,7 +499,7 @@ export default function ChannelFeed({ initialChannels, categories }: ChannelFeed
         ? customChannels.filter(c => c.name.toLowerCase().includes(searchQuery.toLowerCase())) 
         : customChannels;
     }
-    return channels;
+    return displayedAllChannels;
   };
 
   const activeList = getActiveList();
@@ -589,7 +747,7 @@ export default function ChannelFeed({ initialChannels, categories }: ChannelFeed
               </div>
 
               {/* Load More Button */}
-              {activeTab === 'all' && hasMoreRef.current && (
+              {activeTab === 'all' && hasMore && (
                 <button
                   onClick={handleLoadMore}
                   disabled={loading}
