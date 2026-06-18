@@ -50,6 +50,14 @@ export default function ChannelPlayer({
     setUseProxyState(false);
   }, [channel.id]);
 
+  // Player controls state
+  const [duration, setDuration] = useState(0);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [bufferedEnd, setBufferedEnd] = useState(0);
+  const [controlsVisible, setControlsVisible] = useState(true);
+  const [volume, setVolume] = useState(0.5);
+  const [showDoubleTapFeedback, setShowDoubleTapFeedback] = useState<'left' | 'right' | null>(null);
+
   // Gesture-controlled HUD states
   const [hudVolume, setHudVolume] = useState<number | null>(null); // 0-100
   const [hudSeekDelta, setHudSeekDelta] = useState<number | null>(null); // in seconds
@@ -65,6 +73,11 @@ export default function ChannelPlayer({
   const touchStartRef = useRef<{ x: number; y: number; vol: number; time: number } | null>(null);
   const gestureTypeRef = useRef<'volume' | 'seek' | null>(null);
   const cleanupListenersRef = useRef<(() => void) | null>(null);
+  const controlsTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Single/Double Click detection refs
+  const lastClickTimeRef = useRef(0);
+  const clickTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const proxyUrl = useCallback((url: string) => {
     const encoded = encodeURIComponent(url);
@@ -123,6 +136,29 @@ export default function ChannelPlayer({
     }
   };
 
+  const showControlsTemporarily = useCallback(() => {
+    setControlsVisible(true);
+    if (controlsTimeoutRef.current) {
+      clearTimeout(controlsTimeoutRef.current);
+    }
+    controlsTimeoutRef.current = setTimeout(() => {
+      setControlsVisible(false);
+    }, 3500);
+  }, []);
+
+  const handleMouseMove = () => {
+    showControlsTemporarily();
+  };
+
+  useEffect(() => {
+    showControlsTemporarily();
+    return () => {
+      if (controlsTimeoutRef.current) {
+        clearTimeout(controlsTimeoutRef.current);
+      }
+    };
+  }, [channel.id, showControlsTemporarily]);
+
   const destroyHls = useCallback(() => {
     if (cleanupListenersRef.current) {
       cleanupListenersRef.current();
@@ -152,6 +188,9 @@ export default function ChannelPlayer({
     setBuffering(false);
     setErrorMsg(null);
     setIsLive(false);
+    setDuration(0);
+    setCurrentTime(0);
+    setBufferedEnd(0);
     retryCountRef.current = 0;
 
     const shouldProxy = forceProxy || useProxyState;
@@ -162,9 +201,12 @@ export default function ChannelPlayer({
     const savedVol = localStorage.getItem('amadeus_player_volume');
     const savedMuted = localStorage.getItem('amadeus_player_muted');
     if (savedVol !== null) {
-      video.volume = parseFloat(savedVol);
+      const vol = parseFloat(savedVol);
+      video.volume = vol;
+      setVolume(vol);
     } else {
       video.volume = 0.5; // default
+      setVolume(0.5);
     }
     if (savedMuted !== null) {
       video.muted = savedMuted === 'true';
@@ -302,6 +344,7 @@ export default function ChannelPlayer({
       video.src = manifestUrl;
       video.addEventListener('loadedmetadata', () => {
         setLoading(false);
+        setIsLive(video.duration === Infinity || isNaN(video.duration) || video.duration === 0);
         video.play().catch(() => {});
         onReady();
       });
@@ -348,6 +391,110 @@ export default function ChannelPlayer({
     }
   }, [muted]);
 
+  // Video Events Handlers
+  const handleTimeUpdate = () => {
+    const video = videoRef.current;
+    if (!video) return;
+    setCurrentTime(video.currentTime);
+  };
+
+  const handleDurationChange = () => {
+    const video = videoRef.current;
+    if (!video) return;
+    setDuration(video.duration);
+    setIsLive(video.duration === Infinity || isNaN(video.duration) || video.duration === 0);
+  };
+
+  const handleProgress = () => {
+    const video = videoRef.current;
+    if (!video || !video.buffered.length) return;
+    const curTime = video.currentTime;
+    let bufEnd = 0;
+    for (let i = 0; i < video.buffered.length; i++) {
+      if (video.buffered.start(i) <= curTime && video.buffered.end(i) >= curTime) {
+        bufEnd = video.buffered.end(i);
+        break;
+      }
+    }
+    setBufferedEnd(bufEnd);
+  };
+
+  const handleSeekChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const video = videoRef.current;
+    if (!video) return;
+    const targetTime = parseFloat(e.target.value);
+    video.currentTime = targetTime;
+    setCurrentTime(targetTime);
+  };
+
+  const handleVolumeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const video = videoRef.current;
+    if (!video) return;
+    const val = parseFloat(e.target.value);
+    setVolume(val);
+    video.volume = val;
+    localStorage.setItem('amadeus_player_volume', val.toString());
+    
+    if (val > 0 && muted) {
+      onToggleMute();
+      localStorage.setItem('amadeus_player_muted', 'false');
+    } else if (val === 0 && !muted) {
+      onToggleMute();
+      localStorage.setItem('amadeus_player_muted', 'true');
+    }
+  };
+
+  // Click & Double click handles (YouTube gestures)
+  const handleVideoClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    const rect = containerRef.current?.getBoundingClientRect();
+    if (!rect) return;
+
+    const xRelative = e.clientX - rect.left;
+    const width = rect.width;
+    const isRightSide = xRelative > width / 2;
+
+    const now = Date.now();
+    const DOUBLE_PRESS_DELAY = 300;
+
+    if (now - lastClickTimeRef.current < DOUBLE_PRESS_DELAY) {
+      if (clickTimeoutRef.current) {
+        clearTimeout(clickTimeoutRef.current);
+        clickTimeoutRef.current = null;
+      }
+      handleDoublePress(isRightSide);
+      lastClickTimeRef.current = 0;
+    } else {
+      lastClickTimeRef.current = now;
+      if (clickTimeoutRef.current) clearTimeout(clickTimeoutRef.current);
+      clickTimeoutRef.current = setTimeout(() => {
+        togglePlay();
+        showControlsTemporarily();
+        clickTimeoutRef.current = null;
+      }, DOUBLE_PRESS_DELAY);
+    }
+  };
+
+  const handleDoublePress = (isRightSide: boolean) => {
+    const video = videoRef.current;
+    if (!video || isLive) return;
+
+    const dur = video.duration;
+    if (!dur || !isFinite(dur)) return;
+
+    const delta = 10;
+    if (isRightSide) {
+      video.currentTime = Math.min(dur, video.currentTime + delta);
+      setShowDoubleTapFeedback('right');
+    } else {
+      video.currentTime = Math.max(0, video.currentTime - delta);
+      setShowDoubleTapFeedback('left');
+    }
+
+    setTimeout(() => {
+      setShowDoubleTapFeedback(null);
+    }, 800);
+  };
+
   // Touch Gesture Handlers
   const handleTouchStart = (e: React.TouchEvent<HTMLDivElement>) => {
     const video = videoRef.current;
@@ -388,16 +535,12 @@ export default function ChannelPlayer({
     // Process gesture
     if (gestureTypeRef.current === 'volume') {
       if (e.cancelable) e.preventDefault();
-      // Swipe up increases volume, swipe down decreases. Sensitivity: 200px drag for 0-100%
       const volumeChange = -dy / 200;
       let newVol = Math.max(0, Math.min(1, start.vol + volumeChange));
       video.volume = newVol;
+      setVolume(newVol);
       if (newVol > 0 && video.muted) {
-        video.muted = false;
-        // Notify parent if parent state tracks muted
-        if (muted) {
-          onToggleMute();
-        }
+        onToggleMute();
       }
       setHudVolume(Math.round(newVol * 100));
       setHudSeekDelta(null);
@@ -405,16 +548,14 @@ export default function ChannelPlayer({
       if (e.cancelable) e.preventDefault();
       
       if (isLive) {
-        // Live feedback
         setHudSeekDelta(dx > 0 ? 1 : -1);
         setHudSeekTarget('LIVE');
         setHudVolume(null);
       } else {
-        const duration = video.duration;
-        if (duration && isFinite(duration)) {
-          // Drag 300px for 90s seek
+        const dur = video.duration;
+        if (dur && isFinite(dur)) {
           const seekChange = (dx / 300) * 90;
-          let targetTime = Math.max(0, Math.min(duration, start.time + seekChange));
+          let targetTime = Math.max(0, Math.min(dur, start.time + seekChange));
           const delta = Math.round(targetTime - start.time);
           
           setHudSeekDelta(delta);
@@ -425,33 +566,60 @@ export default function ChannelPlayer({
     }
   };
 
-  const handleTouchEnd = () => {
+  const handleTouchEnd = (e: React.TouchEvent<HTMLDivElement>) => {
     const video = videoRef.current;
     const start = touchStartRef.current;
     
     if (video && start) {
       if (gestureTypeRef.current === 'seek' && !isLive) {
-        const duration = video.duration;
-        if (duration && isFinite(duration) && hudSeekDelta !== null) {
-          video.currentTime = Math.max(0, Math.min(duration, start.time + hudSeekDelta));
+        const dur = video.duration;
+        if (dur && isFinite(dur) && hudSeekDelta !== null) {
+          video.currentTime = Math.max(0, Math.min(dur, start.time + hudSeekDelta));
         }
       } else if (gestureTypeRef.current === 'volume') {
         localStorage.setItem('amadeus_player_volume', video.volume.toString());
         localStorage.setItem('amadeus_player_muted', video.muted ? 'true' : 'false');
+      } else if (!gestureTypeRef.current) {
+        // Tap on screen to toggle controls or pause/play (mimic click on mobile)
+        const rect = containerRef.current?.getBoundingClientRect();
+        if (rect) {
+          const clientX = e.changedTouches[0].clientX;
+          const xRelative = clientX - rect.left;
+          const isRightSide = xRelative > rect.width / 2;
+          const now = Date.now();
+          const DOUBLE_PRESS_DELAY = 300;
+
+          if (now - lastClickTimeRef.current < DOUBLE_PRESS_DELAY) {
+            if (clickTimeoutRef.current) {
+              clearTimeout(clickTimeoutRef.current);
+              clickTimeoutRef.current = null;
+            }
+            handleDoublePress(isRightSide);
+            lastClickTimeRef.current = 0;
+          } else {
+            lastClickTimeRef.current = now;
+            if (clickTimeoutRef.current) clearTimeout(clickTimeoutRef.current);
+            clickTimeoutRef.current = setTimeout(() => {
+              togglePlay();
+              showControlsTemporarily();
+              clickTimeoutRef.current = null;
+            }, DOUBLE_PRESS_DELAY);
+          }
+        }
       }
     }
 
-    // Reset touch trackers
     touchStartRef.current = null;
     gestureTypeRef.current = null;
 
-    // Fade out HUD slowly
     setTimeout(() => {
       setHudVolume(null);
       setHudSeekDelta(null);
       setHudSeekTarget(null);
     }, 600);
   };
+
+  const showControls = controlsVisible || !isPlaying;
 
   return (
     <div 
@@ -460,6 +628,7 @@ export default function ChannelPlayer({
       onTouchStart={handleTouchStart}
       onTouchMove={handleTouchMove}
       onTouchEnd={handleTouchEnd}
+      onMouseMove={handleMouseMove}
     >
       <video
         ref={videoRef}
@@ -469,7 +638,18 @@ export default function ChannelPlayer({
         muted={muted}
         loop={false}
         preload="none"
+        onTimeUpdate={handleTimeUpdate}
+        onDurationChange={handleDurationChange}
+        onProgress={handleProgress}
       />
+
+      {/* Transparent Click Overlay */}
+      {isActive && !errorMsg && !loading && (
+        <div 
+          className="player-click-overlay" 
+          onClick={handleVideoClick}
+        />
+      )}
 
       {/* Loading overlay */}
       {loading && isActive && !errorMsg && (
@@ -536,77 +716,149 @@ export default function ChannelPlayer({
         </div>
       )}
 
-      {/* Center Play/Pause overlay */}
-      {isActive && !errorMsg && !loading && !buffering && (
+      {/* Double tap ripple feedback */}
+      {showDoubleTapFeedback && (
+        <div className={`double-tap-feedback ${showDoubleTapFeedback}`}>
+          <div className="double-tap-arrow-wrapper">
+            <span className="double-tap-arrow"></span>
+            <span className="double-tap-arrow"></span>
+            <span className="double-tap-arrow"></span>
+          </div>
+          <div className="double-tap-text">10 сек</div>
+        </div>
+      )}
+
+      {/* Center Play/Pause Indicator (toggles opacity momentarily) */}
+      {isActive && !errorMsg && !loading && !buffering && !isPlaying && (
         <div className="player-center-play-btn-wrap" onClick={togglePlay}>
           <button 
-            className={`player-center-play-btn ${!isPlaying ? 'paused' : ''}`} 
-            aria-label={isPlaying ? 'Pause' : 'Play'}
+            className="player-center-play-btn paused" 
+            aria-label="Play"
           >
-            {isPlaying ? '⏸' : '▶'}
+            ▶
           </button>
         </div>
       )}
 
-      {/* Controls Overlay */}
+      {/* Cinematic Control Bar */}
       {isActive && !errorMsg && !loading && (
-        <div className="player-controls-bottom-right">
-          {/* Quality Selector */}
-          {levels.length > 0 && (
-            <div className="player-quality-selector-wrap">
+        <div 
+          className={`player-control-bar ${showControls ? 'visible' : ''}`}
+          onClick={(e) => e.stopPropagation()}
+          onTouchStart={(e) => e.stopPropagation()}
+        >
+          {/* Timeline / Progress Bar (Seek Bar) */}
+          <div className="player-timeline-container">
+            {!isLive && duration > 0 ? (
+              <div className="player-timeline-slider-wrapper">
+                <input
+                  type="range"
+                  min={0}
+                  max={duration}
+                  step={0.1}
+                  value={currentTime}
+                  onChange={handleSeekChange}
+                  className="player-timeline-slider"
+                  style={{
+                    '--progress-percent': `${(currentTime / duration) * 100}%`,
+                    '--buffer-percent': `${(bufferedEnd / duration) * 100}%`,
+                  } as React.CSSProperties}
+                />
+              </div>
+            ) : (
+              <div className="player-timeline-live-placeholder">
+                <span className="live-indicator-dot" />
+                <span className="live-indicator-text">ПРЯМОЙ ЭФИР</span>
+              </div>
+            )}
+          </div>
+
+          {/* Bottom row of controls */}
+          <div className="player-controls-row">
+            {/* Left side: Play, Volume, Time */}
+            <div className="player-controls-left">
               <button
-                onClick={() => setQualityMenuOpen(!qualityMenuOpen)}
-                className={`control-btn-player ${qualityMenuOpen ? 'btn-active' : ''}`}
-                title="Выбор качества"
+                onClick={togglePlay}
+                className="control-btn-bar"
+                title={isPlaying ? 'Пауза' : 'Воспроизвести'}
               >
-                ⚙️ {currentLevel === -1 ? 'Авто' : levels.find(l => l.index === currentLevel)?.name || ''}
+                {isPlaying ? '⏸' : '▶'}
               </button>
-              {qualityMenuOpen && (
-                <div className="player-quality-menu">
-                  {levels.map((lvl) => {
-                    const isSelected = lvl.index === currentLevel;
-                    return (
-                      <button
-                        key={lvl.index}
-                        onClick={() => {
-                          if (hlsRef.current) {
-                            hlsRef.current.currentLevel = lvl.index;
-                            setCurrentLevel(lvl.index);
-                          }
-                          setQualityMenuOpen(false);
-                        }}
-                        className={`quality-menu-item ${isSelected ? 'selected' : ''}`}
-                      >
-                        {lvl.name} {isSelected && '✓'}
-                      </button>
-                    );
-                  })}
+
+              <div className="player-volume-control">
+                <button
+                  onClick={onToggleMute}
+                  className="control-btn-bar"
+                  title={muted ? 'Включить звук' : 'Выключить звук'}
+                >
+                  {muted || volume === 0 ? '🔇' : volume > 0.5 ? '🔊' : '🔉'}
+                </button>
+                <input
+                  type="range"
+                  min={0}
+                  max={1}
+                  step={0.01}
+                  value={muted ? 0 : volume}
+                  onChange={handleVolumeChange}
+                  className="player-volume-slider"
+                />
+              </div>
+
+              {!isLive && duration > 0 && (
+                <div className="player-time-display">
+                  <span className="time-current">{formatTime(currentTime)}</span>
+                  <span className="time-separator">/</span>
+                  <span className="time-duration">{formatTime(duration)}</span>
                 </div>
               )}
             </div>
-          )}
 
-          <button
-            onClick={togglePlay}
-            className="control-btn-player"
-            title={isPlaying ? 'Пауза' : 'Воспроизвести'}
-          >
-            {isPlaying ? '⏸' : '▶'}
-          </button>
-          <button
-            onClick={handleFullscreen}
-            className="control-btn-player"
-            title="Во весь экран"
-          >
-            ⛶
-          </button>
-          <button
-            onClick={onToggleMute}
-            className="control-btn-player"
-            title={muted ? 'Включить звук' : 'Выключить звук'}
-          >
-            {muted ? '🔇' : '🔊'}
-          </button>
+            {/* Right side: Quality, Fullscreen */}
+            <div className="player-controls-right">
+              {/* Quality Selector */}
+              {levels.length > 0 && (
+                <div className="player-quality-selector-wrap">
+                  <button
+                    onClick={() => setQualityMenuOpen(!qualityMenuOpen)}
+                    className={`control-btn-bar ${qualityMenuOpen ? 'btn-active' : ''}`}
+                    title="Выбор качества"
+                  >
+                    ⚙️ {currentLevel === -1 ? 'Авто' : levels.find(l => l.index === currentLevel)?.name || ''}
+                  </button>
+                  {qualityMenuOpen && (
+                    <div className="player-quality-menu">
+                      {levels.map((lvl) => {
+                        const isSelected = lvl.index === currentLevel;
+                        return (
+                          <button
+                            key={lvl.index}
+                            onClick={() => {
+                              if (hlsRef.current) {
+                                hlsRef.current.currentLevel = lvl.index;
+                                setCurrentLevel(lvl.index);
+                              }
+                              setQualityMenuOpen(false);
+                            }}
+                            className={`quality-menu-item ${isSelected ? 'selected' : ''}`}
+                          >
+                            {lvl.name} {isSelected && '✓'}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <button
+                onClick={handleFullscreen}
+                className="control-btn-bar"
+                title="Во весь экран"
+              >
+                ⛶
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
@@ -647,3 +899,4 @@ function formatTime(seconds: number): string {
   }
   return `${mm}:${ss}`;
 }
+

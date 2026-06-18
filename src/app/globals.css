@@ -272,36 +272,342 @@ html, body {
   font-size: 0.8rem;
 }
 
-.player-controls-bottom-right {
+/* YouTube-style Cinematic Control Bar & Elements */
+.player-click-overlay {
   position: absolute;
-  bottom: 16px;
-  right: 16px;
-  display: flex;
-  gap: 8px;
-  z-index: 30;
+  inset: 0;
+  z-index: 25;
+  background: transparent;
 }
 
-.control-btn-player {
-  width: 42px;
-  height: 42px;
+.player-control-bar {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  width: 100%;
+  padding: 24px 20px 16px 20px;
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.95) 0%, rgba(0, 0, 0, 0.5) 70%, transparent 100%);
+  backdrop-filter: blur(10px);
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  opacity: 0;
+  transform: translateY(8px);
+  pointer-events: none;
+  transition: opacity 0.3s cubic-bezier(0.4, 0, 0.2, 1), transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.player-control-bar.visible {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+
+/* Timeline / Seek Bar */
+.player-timeline-container {
+  width: 100%;
+  display: flex;
+  align-items: center;
+}
+
+.player-timeline-live-placeholder {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  background: rgba(230, 57, 70, 0.15);
+  border: 1px solid rgba(230, 57, 70, 0.3);
+  border-radius: var(--radius-sm);
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--accent-secondary);
+}
+
+.live-indicator-dot {
+  width: 7px;
+  height: 7px;
+  background-color: var(--accent-primary);
+  border-radius: 50%;
+  box-shadow: 0 0 8px var(--accent-secondary);
+  animation: blink 1.2s infinite;
+}
+
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+.player-timeline-slider-wrapper {
+  position: relative;
+  width: 100%;
+  height: 14px;
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+}
+
+.player-timeline-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 4px;
   border-radius: var(--radius-full);
-  background: rgba(13, 13, 21, 0.7);
-  border: 1px solid var(--border-glass);
+  outline: none;
+  cursor: pointer;
+  transition: height 0.1s ease;
+  background: linear-gradient(to right, 
+    var(--accent-primary) 0%, 
+    var(--accent-primary) var(--progress-percent), 
+    rgba(255, 255, 255, 0.35) var(--progress-percent), 
+    rgba(255, 255, 255, 0.35) var(--buffer-percent), 
+    rgba(255, 255, 255, 0.15) var(--buffer-percent), 
+    rgba(255, 255, 255, 0.15) 100%
+  );
+}
+
+.player-timeline-slider-wrapper:hover .player-timeline-slider {
+  height: 6px;
+}
+
+/* Timeline Thumb */
+.player-timeline-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: var(--accent-primary);
+  box-shadow: 0 0 10px var(--accent-secondary);
+  transition: transform 0.1s ease;
+  transform: scale(0);
+}
+
+.player-timeline-slider-wrapper:hover .player-timeline-slider::-webkit-slider-thumb {
+  transform: scale(1.2);
+}
+
+.player-timeline-slider::-moz-range-thumb {
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: var(--accent-primary);
+  border: none;
+  box-shadow: 0 0 10px var(--accent-secondary);
+  transition: transform 0.1s ease;
+  transform: scale(0);
+}
+
+.player-timeline-slider-wrapper:hover .player-timeline-slider::-moz-range-thumb {
+  transform: scale(1.2);
+}
+
+/* Controls Rows */
+.player-controls-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+}
+
+.player-controls-left, 
+.player-controls-right {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.control-btn-bar {
+  background: transparent;
+  border: none;
   color: white;
+  font-size: 1.2rem;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-full);
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  backdrop-filter: blur(12px);
-  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-  font-size: 1.15rem;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-.control-btn-player:hover {
-  background: var(--accent-primary);
-  border-color: transparent;
-  box-shadow: var(--shadow-glow);
+.control-btn-bar:hover, 
+.control-btn-bar.btn-active {
+  background: rgba(255, 255, 255, 0.1);
   transform: scale(1.08);
+}
+
+.control-btn-bar.btn-active {
+  color: var(--accent-secondary);
+  background: rgba(230, 57, 70, 0.15);
+}
+
+/* Volume control slider */
+.player-volume-control {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.player-volume-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 0px;
+  height: 4px;
+  border-radius: var(--radius-full);
+  background: rgba(255, 255, 255, 0.25);
+  outline: none;
+  opacity: 0;
+  transition: width 0.25s ease, opacity 0.25s ease;
+  pointer-events: none;
+}
+
+.player-volume-control:hover .player-volume-slider {
+  width: 65px;
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.player-volume-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: white;
+  cursor: pointer;
+  box-shadow: 0 0 5px rgba(0, 0, 0, 0.5);
+}
+
+.player-volume-slider::-moz-range-thumb {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: white;
+  border: none;
+  cursor: pointer;
+  box-shadow: 0 0 5px rgba(0, 0, 0, 0.5);
+}
+
+@media (max-width: 768px) {
+  .player-volume-slider {
+    width: 55px !important;
+    opacity: 1 !important;
+    pointer-events: auto !important;
+  }
+}
+
+/* Time Display */
+.player-time-display {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.85);
+  font-family: monospace;
+}
+
+.time-current {
+  color: white;
+}
+
+.time-separator {
+  color: rgba(255, 255, 255, 0.4);
+}
+
+.time-duration {
+  color: rgba(255, 255, 255, 0.6);
+}
+
+/* Quality Selector Wrapper Overrides */
+.player-quality-selector-wrap .player-quality-menu {
+  bottom: 44px;
+  right: 0;
+}
+
+/* Double click / Tap Seek Feedback */
+.double-tap-feedback {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  width: 35%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  z-index: 24;
+  pointer-events: none;
+  color: white;
+  animation: fadeOutDoubleTap 0.8s cubic-bezier(0.25, 0.8, 0.25, 1) forwards;
+}
+
+.double-tap-feedback.left {
+  left: 0;
+  background: radial-gradient(circle at 0% 50%, rgba(255, 255, 255, 0.12) 0%, transparent 70%);
+  border-radius: 0 100px 100px 0;
+}
+
+.double-tap-feedback.right {
+  right: 0;
+  background: radial-gradient(circle at 100% 50%, rgba(255, 255, 255, 0.12) 0%, transparent 70%);
+  border-radius: 100px 0 0 100px;
+}
+
+.double-tap-arrow-wrapper {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
+.double-tap-arrow {
+  display: inline-block;
+  width: 0;
+  height: 0;
+  border-style: solid;
+}
+
+.left .double-tap-arrow {
+  border-width: 6px 8px 6px 0;
+  border-color: transparent white transparent transparent;
+  animation: arrowMoveLeft 0.8s infinite;
+}
+
+.right .double-tap-arrow {
+  border-width: 6px 0 6px 8px;
+  border-color: transparent transparent transparent white;
+  animation: arrowMoveRight 0.8s infinite;
+}
+
+.double-tap-arrow:nth-child(1) { animation-delay: 0s; }
+.double-tap-arrow:nth-child(2) { animation-delay: 0.15s; }
+.double-tap-arrow:nth-child(3) { animation-delay: 0.3s; }
+
+.double-tap-text {
+  font-size: 0.85rem;
+  font-weight: 700;
+  text-shadow: 0 2px 5px rgba(0, 0, 0, 0.5);
+}
+
+@keyframes fadeOutDoubleTap {
+  0% { opacity: 0; transform: scale(0.9); }
+  15% { opacity: 1; transform: scale(1); }
+  80% { opacity: 1; }
+  100% { opacity: 0; transform: scale(0.95); }
+}
+
+@keyframes arrowMoveLeft {
+  0% { opacity: 0.2; transform: translateX(2px); }
+  50% { opacity: 1; transform: translateX(-2px); }
+  100% { opacity: 0.2; transform: translateX(2px); }
+}
+
+@keyframes arrowMoveRight {
+  0% { opacity: 0.2; transform: translateX(-2px); }
+  50% { opacity: 1; transform: translateX(2px); }
+  100% { opacity: 0.2; transform: translateX(-2px); }
 }
 
 .player-actions-overlay {
