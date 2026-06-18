@@ -13,9 +13,9 @@ interface ChannelPlayerProps {
   onToggleMute: () => void;
 }
 
-const MAX_RETRIES = 5;
-const RETRY_DELAY_MS = 2000;
-const LOAD_TIMEOUT_MS = 15000;
+const MAX_RETRIES = 2;
+const RETRY_DELAY_MS = 1000;
+const LOAD_TIMEOUT_MS = 8000;
 
 export default function ChannelPlayer({
   channel,
@@ -33,6 +33,7 @@ export default function ChannelPlayer({
   
   const [loading, setLoading] = useState(true);
   const [buffering, setBuffering] = useState(false);
+  const [isPlaying, setIsPlaying] = useState(true);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   // Gesture-controlled HUD states
@@ -75,6 +76,19 @@ export default function ChannelPlayer({
     }
   };
 
+  const togglePlay = () => {
+    const video = videoRef.current;
+    if (!video) return;
+
+    if (video.paused) {
+      video.play().catch(() => {});
+      setIsPlaying(true);
+    } else {
+      video.pause();
+      setIsPlaying(false);
+    }
+  };
+
   const destroyHls = useCallback(() => {
     if (cleanupListenersRef.current) {
       cleanupListenersRef.current();
@@ -89,6 +103,7 @@ export default function ChannelPlayer({
       hlsRef.current = null;
     }
     setBuffering(false);
+    setIsPlaying(true);
     setLevels([]);
     setCurrentLevel(-2);
     setQualityMenuOpen(false);
@@ -121,42 +136,48 @@ export default function ChannelPlayer({
       video.muted = muted;
     }
 
-    // Attach HTML5 buffering listeners
+    // Attach HTML5 buffering and play/pause listeners
     const handleWaiting = () => setBuffering(true);
     const handlePlaying = () => setBuffering(false);
+    const handlePlay = () => setIsPlaying(true);
+    const handlePause = () => setIsPlaying(false);
     
     video.addEventListener('waiting', handleWaiting);
     video.addEventListener('playing', handlePlaying);
+    video.addEventListener('play', handlePlay);
+    video.addEventListener('pause', handlePause);
     
     cleanupListenersRef.current = () => {
       video.removeEventListener('waiting', handleWaiting);
       video.removeEventListener('playing', handlePlaying);
+      video.removeEventListener('play', handlePlay);
+      video.removeEventListener('pause', handlePause);
     };
 
     if (Hls.isSupported()) {
       const hls = new Hls({
         enableWorker: true,
-        lowLatencyMode: false,
-        maxBufferLength: 120, // 2 minutes of buffering ahead like YouTube
-        maxMaxBufferLength: 240, // Up to 4 minutes ahead
-        maxBufferSize: 150 * 1024 * 1024, // 150MB memory buffer size limit
+        lowLatencyMode: true,
+        maxBufferLength: 15, // Keep buffer small (15s) for live streams to avoid drift & 404s
+        maxMaxBufferLength: 30, // Max 30s buffer
+        maxBufferSize: 30 * 1024 * 1024, // 30MB
         maxBufferHole: 0.5,
         startLevel: -1,
         
-        manifestLoadingTimeOut: 15000,
-        manifestLoadingMaxRetry: 6,
+        manifestLoadingTimeOut: 8000,
+        manifestLoadingMaxRetry: 3,
         manifestLoadingRetryDelay: 1000,
         
-        levelLoadingTimeOut: 15000,
-        levelLoadingMaxRetry: 6,
+        levelLoadingTimeOut: 8000,
+        levelLoadingMaxRetry: 3,
         levelLoadingRetryDelay: 1000,
         
-        fragLoadingTimeOut: 20000,
-        fragLoadingMaxRetry: 8,
+        fragLoadingTimeOut: 10000,
+        fragLoadingMaxRetry: 4,
         fragLoadingRetryDelay: 1000,
         
-        abrBandWidthFactor: 0.85,
-        abrBandWidthUpFactor: 0.65,
+        abrBandWidthFactor: 0.9,
+        abrBandWidthUpFactor: 0.7,
         abrEwmaDefaultEstimate: 500000,
       });
 
@@ -433,6 +454,18 @@ export default function ChannelPlayer({
         </div>
       )}
 
+      {/* Center Play/Pause overlay */}
+      {isActive && !errorMsg && !loading && !buffering && (
+        <div className="player-center-play-btn-wrap" onClick={togglePlay}>
+          <button 
+            className={`player-center-play-btn ${!isPlaying ? 'paused' : ''}`} 
+            aria-label={isPlaying ? 'Pause' : 'Play'}
+          >
+            {isPlaying ? '⏸' : '▶'}
+          </button>
+        </div>
+      )}
+
       {/* Controls Overlay */}
       {isActive && !errorMsg && !loading && (
         <div className="player-controls-bottom-right">
@@ -471,6 +504,13 @@ export default function ChannelPlayer({
             </div>
           )}
 
+          <button
+            onClick={togglePlay}
+            className="control-btn-player"
+            title={isPlaying ? 'Пауза' : 'Воспроизвести'}
+          >
+            {isPlaying ? '⏸' : '▶'}
+          </button>
           <button
             onClick={handleFullscreen}
             className="control-btn-player"

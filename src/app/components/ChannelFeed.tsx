@@ -41,6 +41,7 @@ export default function ChannelFeed({ initialChannels, categories }: ChannelFeed
   const [searchOpen, setSearchOpen] = useState(false);
 
   const overlayTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const searchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pageRef = useRef(1);
   const hasMoreRef = useRef(true);
 
@@ -139,8 +140,15 @@ export default function ChannelFeed({ initialChannels, categories }: ChannelFeed
   const handleSearchChange = (query: string) => {
     setSearchQuery(query);
     pageRef.current = 1;
+    
+    if (searchTimeoutRef.current) {
+      clearTimeout(searchTimeoutRef.current);
+    }
+    
     if (activeTab === 'all') {
-      fetchChannels(activeCategory, activeLanguage, activeCountry, query, 1);
+      searchTimeoutRef.current = setTimeout(() => {
+        fetchChannels(activeCategory, activeLanguage, activeCountry, query, 1);
+      }, 400);
     }
   };
 
@@ -209,6 +217,7 @@ export default function ChannelFeed({ initialChannels, categories }: ChannelFeed
   useEffect(() => {
     return () => {
       if (overlayTimerRef.current) clearTimeout(overlayTimerRef.current);
+      if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
     };
   }, []);
 

@@ -844,3 +844,52 @@ html, body {
   }
 }
 
+/* Center Play/Pause Overlay styling */
+.player-center-play-btn-wrap {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 28;
+  cursor: pointer;
+}
+
+.player-center-play-btn {
+  width: 64px;
+  height: 64px;
+  border-radius: var(--radius-full);
+  background: rgba(13, 13, 21, 0.6);
+  border: 1px solid var(--border-glass);
+  color: white;
+  font-size: 1.8rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  backdrop-filter: blur(12px);
+  transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+  opacity: 0;
+  transform: scale(0.8);
+  pointer-events: none;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+}
+
+.player-container:hover .player-center-play-btn {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.player-center-play-btn.paused {
+  opacity: 1 !important;
+  transform: scale(1) !important;
+  background: rgba(230, 57, 70, 0.8);
+  border-color: var(--accent-secondary);
+  box-shadow: var(--shadow-glow);
+}
+
+.player-center-play-btn:active {
+  transform: scale(0.9);
+  background: var(--accent-primary);
+  border-color: transparent;
+}
+

@@ -70,10 +70,44 @@ export async function GET(request: NextRequest) {
       cleanHeaders.set(key, value);
     }
 
-    const upstream = await fetch(targetUrl, {
-      headers: cleanHeaders,
-      redirect: 'follow',
-    });
+    let currentUrl = targetUrl;
+    let redirectCount = 0;
+    const MAX_REDIRECTS = 10;
+    let upstream: Response | null = null;
+
+    while (redirectCount < MAX_REDIRECTS) {
+      const proxyHeaders = getProxyHeaders(currentUrl);
+      const cleanHeaders = new Headers();
+      for (const [key, value] of Object.entries(proxyHeaders)) {
+        cleanHeaders.set(key, value);
+      }
+
+      const res = await fetch(currentUrl, {
+        headers: cleanHeaders,
+        redirect: 'manual',
+      });
+
+      if (res.status >= 300 && res.status < 400) {
+        const location = res.headers.get('location');
+        if (!location) {
+          upstream = res;
+          break;
+        }
+        const absoluteLocation = new URL(location, currentUrl).href;
+        currentUrl = absoluteLocation;
+        redirectCount++;
+      } else {
+        upstream = res;
+        break;
+      }
+    }
+
+    if (!upstream) {
+      return NextResponse.json(
+        { error: 'Too many redirects' },
+        { status: 508, headers: CORS_HEADERS }
+      );
+    }
 
     if (!upstream.ok) {
       return NextResponse.json(
