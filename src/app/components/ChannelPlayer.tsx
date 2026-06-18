@@ -81,6 +81,22 @@ export default function ChannelPlayer({
   const lastClickTimeRef = useRef(0);
   const clickTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Refs for parameters that shouldn't re-trigger HLS initialization
+  const onErrorRef = useRef(onError);
+  const onReadyRef = useRef(onReady);
+  const autoSwitchRef = useRef(autoSwitch);
+  const forceProxyRef = useRef(forceProxy);
+  const mutedRef = useRef(muted);
+
+  // Keep refs updated on every render
+  useEffect(() => {
+    onErrorRef.current = onError;
+    onReadyRef.current = onReady;
+    autoSwitchRef.current = autoSwitch;
+    forceProxyRef.current = forceProxy;
+    mutedRef.current = muted;
+  });
+
   const proxyUrl = useCallback((url: string) => {
     const encoded = encodeURIComponent(url);
     return `/api/stream?url=${encoded}`;
@@ -202,7 +218,7 @@ export default function ChannelPlayer({
       timeCurrentRef.current.innerText = '00:00';
     }
 
-    const shouldProxy = forceProxy || useProxyState;
+    const shouldProxy = forceProxyRef.current || useProxyState;
     const manifestUrl = shouldProxy ? proxyUrl(channel.url) : channel.url;
     console.log(`[Player] Initializing "${channel.name}". Mode: ${shouldProxy ? 'PROXY' : 'DIRECT'}. URL: ${manifestUrl}`);
 
@@ -220,7 +236,7 @@ export default function ChannelPlayer({
     if (savedMuted !== null) {
       video.muted = savedMuted === 'true';
     } else {
-      video.muted = muted;
+      video.muted = mutedRef.current;
     }
 
     // Attach HTML5 buffering and play/pause listeners
@@ -251,11 +267,11 @@ export default function ChannelPlayer({
         maxBufferHole: 0.5,
         startLevel: -1,
         
-        manifestLoadingTimeOut: 8000,
+        manifestLoadingTimeOut: 5000,
         manifestLoadingMaxRetry: 3,
         manifestLoadingRetryDelay: 1000,
         
-        levelLoadingTimeOut: 8000,
+        levelLoadingTimeOut: 5000,
         levelLoadingMaxRetry: 3,
         levelLoadingRetryDelay: 1000,
         
@@ -277,8 +293,8 @@ export default function ChannelPlayer({
             console.warn(`[Player] Proxy load timeout on "${channel.name}"`);
             setErrorMsg('Канал не отвечает');
             setLoading(false);
-            if (autoSwitch) {
-              onError(channel);
+            if (autoSwitchRef.current) {
+              onErrorRef.current(channel);
             }
           }
         }
@@ -291,7 +307,7 @@ export default function ChannelPlayer({
         }
         setLoading(false);
         video.play().catch(() => {});
-        onReady();
+        onReadyRef.current();
 
         // Load available quality levels
         const hlsLevels = hls.levels.map((level, idx) => ({
@@ -340,8 +356,8 @@ export default function ChannelPlayer({
         } else {
           setErrorMsg(getErrorMessage(data));
           setLoading(false);
-          if (autoSwitch) {
-            onError(channel);
+          if (autoSwitchRef.current) {
+            onErrorRef.current(channel);
           }
         }
       });
@@ -355,7 +371,7 @@ export default function ChannelPlayer({
         setLoading(false);
         setIsLive(video.duration === Infinity || isNaN(video.duration) || video.duration === 0);
         video.play().catch(() => {});
-        onReady();
+        onReadyRef.current();
       });
       video.addEventListener('error', () => {
         if (!shouldProxy) {
@@ -363,8 +379,8 @@ export default function ChannelPlayer({
           setUseProxyState(true);
         } else {
           setErrorMsg('Стрим недоступен');
-          if (autoSwitch) {
-            onError(channel);
+          if (autoSwitchRef.current) {
+            onErrorRef.current(channel);
           }
         }
       });
@@ -373,12 +389,12 @@ export default function ChannelPlayer({
         setUseProxyState(true);
       } else {
         setErrorMsg('HLS не поддерживается');
-        if (autoSwitch) {
-          onError(channel);
+        if (autoSwitchRef.current) {
+          onErrorRef.current(channel);
         }
       }
     }
-  }, [channel, isActive, proxyUrl, destroyHls, onError, onReady, muted, autoSwitch, forceProxy, useProxyState]);
+  }, [channel.id, channel.url, isActive, destroyHls, useProxyState]);
 
   useEffect(() => {
     if (isActive) {
