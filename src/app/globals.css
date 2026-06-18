@@ -500,6 +500,7 @@ html, body {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  animation: fadeIn 0.35s cubic-bezier(0.25, 0.8, 0.25, 1);
 }
 
 .channel-item-card {

@@ -26,6 +26,7 @@ export default function ChannelPlayer({
   onToggleMute,
 }: ChannelPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
   const hlsRef = useRef<Hls | null>(null);
   const retryCountRef = useRef(0);
   const loadTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -51,17 +52,21 @@ export default function ChannelPlayer({
   }, []);
 
   const handleFullscreen = () => {
-    const video = videoRef.current;
-    if (!video) return;
+    const container = containerRef.current;
+    if (!container) return;
 
-    if (video.requestFullscreen) {
-      video.requestFullscreen();
-    } else if ((video as any).webkitRequestFullscreen) {
-      (video as any).webkitRequestFullscreen();
-    } else if ((video as any).mozRequestFullScreen) {
-      (video as any).mozRequestFullScreen();
-    } else if ((video as any).msRequestFullscreen) {
-      (video as any).msRequestFullscreen();
+    if (document.fullscreenElement) {
+      document.exitFullscreen().catch(() => {});
+    } else {
+      if (container.requestFullscreen) {
+        container.requestFullscreen().catch(() => {});
+      } else if ((container as any).webkitRequestFullscreen) {
+        (container as any).webkitRequestFullscreen();
+      } else if ((container as any).mozRequestFullScreen) {
+        (container as any).mozRequestFullScreen();
+      } else if ((container as any).msRequestFullscreen) {
+        (container as any).msRequestFullscreen();
+      }
     }
   };
 
@@ -345,6 +350,7 @@ export default function ChannelPlayer({
 
   return (
     <div 
+      ref={containerRef}
       className="player-container"
       onTouchStart={handleTouchStart}
       onTouchMove={handleTouchMove}
