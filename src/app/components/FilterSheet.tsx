@@ -15,6 +15,8 @@ interface FilterSheetProps {
   activeCountry: string;
   onCountryChange: (code: string) => void;
   onReset: () => void;
+  autoSwitch: boolean;
+  onToggleAutoSwitch: () => void;
 }
 
 export default function FilterSheet({
@@ -30,6 +32,8 @@ export default function FilterSheet({
   activeCountry,
   onCountryChange,
   onReset,
+  autoSwitch,
+  onToggleAutoSwitch,
 }: FilterSheetProps) {
   if (!isOpen) return null;
 
@@ -37,7 +41,7 @@ export default function FilterSheet({
     <div className="filter-sheet-overlay" onClick={onClose}>
       <div className="filter-sheet-content" onClick={(e) => e.stopPropagation()}>
         <div className="filter-sheet-header">
-          <h3 className="filter-sheet-title">🎛️ Расширенный поиск</h3>
+          <h3 className="filter-sheet-title">🎛️ Настройки и поиск</h3>
           <button className="filter-sheet-close" onClick={onClose} aria-label="Закрыть">
             ✕
           </button>
@@ -93,6 +97,34 @@ export default function FilterSheet({
                 </option>
               ))}
             </select>
+          </div>
+
+          {/* Auto Switch Settings */}
+          <div 
+            className="filter-group" 
+            style={{ 
+              flexDirection: 'row', 
+              alignItems: 'center', 
+              gap: '10px', 
+              cursor: 'pointer', 
+              marginTop: '16px',
+              background: 'rgba(255, 255, 255, 0.02)',
+              padding: '12px',
+              borderRadius: 'var(--radius-sm)',
+              border: '1px solid var(--border-glass)'
+            }} 
+            onClick={onToggleAutoSwitch}
+          >
+            <input
+              type="checkbox"
+              id="auto-switch-checkbox"
+              checked={autoSwitch}
+              onChange={() => {}} // Handled by onClick
+              style={{ width: '18px', height: '18px', accentColor: 'var(--accent-primary)', cursor: 'pointer' }}
+            />
+            <label htmlFor="auto-switch-checkbox" style={{ fontSize: '0.85rem', color: 'var(--text-primary)', cursor: 'pointer', fontWeight: 600 }}>
+              Автопереключение при ошибках
+            </label>
           </div>
         </div>
 

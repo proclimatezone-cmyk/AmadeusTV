@@ -5,13 +5,14 @@ import { Channel, ChannelCategory } from '@/lib/types';
 import ChannelPlayer from './ChannelPlayer';
 import ChannelOverlay from './ChannelOverlay';
 import FilterSheet from './FilterSheet';
+import { parseM3U } from '@/lib/m3u-parser';
 
 interface ChannelFeedProps {
   initialChannels: Channel[];
   categories: ChannelCategory[];
 }
 
-type TabType = 'all' | 'favorites' | 'history';
+type TabType = 'all' | 'favorites' | 'history' | 'custom';
 
 export default function ChannelFeed({ initialChannels, categories }: ChannelFeedProps) {
   const [channels, setChannels] = useState<Channel[]>(initialChannels);
@@ -31,6 +32,7 @@ export default function ChannelFeed({ initialChannels, categories }: ChannelFeed
   // LocalStorage lists
   const [favorites, setFavorites] = useState<Channel[]>([]);
   const [history, setHistory] = useState<Channel[]>([]);
+  const [customChannels, setCustomChannels] = useState<Channel[]>([]);
 
   // UI state
   const [muted, setMuted] = useState(true);
@@ -39,18 +41,31 @@ export default function ChannelFeed({ initialChannels, categories }: ChannelFeed
   const [totalChannels, setTotalChannels] = useState(initialChannels.length);
   const [filterOpen, setFilterOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
+  
+  // Iteration 3 states
+  const [autoSwitch, setAutoSwitch] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
+  const [m3uModalOpen, setM3uModalOpen] = useState(false);
+  const [m3uUrl, setM3uUrl] = useState('');
+  const [m3uError, setM3uError] = useState<string | null>(null);
+  const [m3uFileLoading, setM3uFileLoading] = useState(false);
 
   const overlayTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const searchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pageRef = useRef(1);
   const hasMoreRef = useRef(true);
 
-  // Sync favorites & history on mount
+  // Sync favorites, history & custom channels on mount
   useEffect(() => {
     const savedFavs = localStorage.getItem('amadeus_favorites');
     const savedHist = localStorage.getItem('amadeus_history');
+    const savedCustom = localStorage.getItem('amadeus_custom_channels');
+    const savedAutoSwitch = localStorage.getItem('amadeus_autoswitch');
+    
     if (savedFavs) setFavorites(JSON.parse(savedFavs));
     if (savedHist) setHistory(JSON.parse(savedHist));
+    if (savedCustom) setCustomChannels(JSON.parse(savedCustom));
+    if (savedAutoSwitch) setAutoSwitch(savedAutoSwitch === 'true');
   }, []);
 
   // Fetch channels from API
@@ -110,9 +125,9 @@ export default function ChannelFeed({ initialChannels, categories }: ChannelFeed
     }
   }, []);
 
-  // Initial load: F1 category meta
+  // Initial load: fetch global meta
   useEffect(() => {
-    fetchMeta('f1');
+    fetchMeta('all');
   }, [fetchMeta]);
 
   // Handle category/language/country updates
@@ -122,7 +137,6 @@ export default function ChannelFeed({ initialChannels, categories }: ChannelFeed
     setActiveCountry('all');
     pageRef.current = 1;
     fetchChannels(slug, 'all', 'all', searchQuery, 1);
-    fetchMeta(slug);
   };
 
   const handleLanguageChange = (code: string) => {
@@ -159,7 +173,6 @@ export default function ChannelFeed({ initialChannels, categories }: ChannelFeed
     setSearchQuery('');
     pageRef.current = 1;
     fetchChannels('all', 'all', 'all', '', 1);
-    fetchMeta('all');
   };
 
   const handleLoadMore = () => {
@@ -183,16 +196,97 @@ export default function ChannelFeed({ initialChannels, categories }: ChannelFeed
     });
   };
 
-  // Auto-switch to next channel on error
-  const handleChannelError = useCallback((failedChannel: Channel) => {
-    console.log(`Channel "${failedChannel.name}" failed, auto-switching...`);
-    setTimeout(() => {
-      const activeList = getActiveList();
-      if (activeIndex < activeList.length - 1) {
-        handleSelectChannel(activeList[activeIndex + 1], activeIndex + 1);
+  const handleNextChannel = () => {
+    const activeList = getActiveList();
+    if (activeIndex < activeList.length - 1) {
+      handleSelectChannel(activeList[activeIndex + 1], activeIndex + 1);
+    }
+  };
+
+  const handleRetryChannel = () => {
+    setReloadKey(prev => prev + 1);
+  };
+
+  const handleToggleAutoSwitch = () => {
+    const nextVal = !autoSwitch;
+    setAutoSwitch(nextVal);
+    localStorage.setItem('amadeus_autoswitch', nextVal ? 'true' : 'false');
+  };
+
+  const handleImportM3U = async (text: string) => {
+    setM3uFileLoading(true);
+    setM3uError(null);
+    try {
+      const parsed = parseM3U(text);
+      if (parsed.length === 0) {
+        throw new Error('В плейлисте не найдено корректных каналов. Проверьте формат.');
       }
-    }, 1500);
-  }, [activeIndex, favorites, history, channels, activeTab]);
+      setCustomChannels(parsed);
+      localStorage.setItem('amadeus_custom_channels', JSON.stringify(parsed));
+      setActiveTab('custom');
+      setActiveIndex(0);
+      setM3uModalOpen(false);
+      setM3uUrl('');
+    } catch (err) {
+      setM3uError(err instanceof Error ? err.message : 'Ошибка при импорте');
+    } finally {
+      setM3uFileLoading(false);
+    }
+  };
+
+  const handleImportM3UFromUrl = async () => {
+    if (!m3uUrl) return;
+    setM3uFileLoading(true);
+    setM3uError(null);
+    try {
+      const encoded = encodeURIComponent(m3uUrl);
+      const res = await fetch(`/api/stream?url=${encoded}`);
+      if (!res.ok) {
+        throw new Error(`Ошибка скачивания плейлиста: ${res.status}`);
+      }
+      const text = await res.text();
+      await handleImportM3U(text);
+    } catch (err) {
+      setM3uError(err instanceof Error ? err.message : 'Ошибка при скачивании плейлиста');
+    } finally {
+      setM3uFileLoading(false);
+    }
+  };
+
+  const handleImportM3UFromFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      const text = event.target?.result as string;
+      if (text) {
+        await handleImportM3U(text);
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  const handleClearCustomChannels = () => {
+    setCustomChannels([]);
+    localStorage.removeItem('amadeus_custom_channels');
+    if (activeTab === 'custom') {
+      setActiveTab('all');
+      setActiveIndex(0);
+    }
+  };
+
+  // Auto-switch to next channel on error (only if autoSwitch is enabled)
+  const handleChannelError = useCallback((failedChannel: Channel) => {
+    console.log(`Channel "${failedChannel.name}" failed.`);
+    if (autoSwitch) {
+      setTimeout(() => {
+        const activeList = getActiveList();
+        if (activeIndex < activeList.length - 1) {
+          handleSelectChannel(activeList[activeIndex + 1], activeIndex + 1);
+        }
+      }, 3000);
+    }
+  }, [activeIndex, favorites, history, channels, activeTab, autoSwitch]);
 
   const toggleFavorite = (channel: Channel) => {
     setFavorites(prev => {
@@ -232,6 +326,11 @@ export default function ChannelFeed({ initialChannels, categories }: ChannelFeed
         ? history.filter(c => c.name.toLowerCase().includes(searchQuery.toLowerCase())) 
         : history;
     }
+    if (activeTab === 'custom') {
+      return searchQuery 
+        ? customChannels.filter(c => c.name.toLowerCase().includes(searchQuery.toLowerCase())) 
+        : customChannels;
+    }
     return channels;
   };
 
@@ -241,17 +340,23 @@ export default function ChannelFeed({ initialChannels, categories }: ChannelFeed
 
   return (
     <div className="wide-player-layout">
+      {/* Ambient background glow */}
+      <div className="ambient-glow-bg" />
       {/* 1. Main player area */}
       <div className="main-player-section">
         {currentChannel ? (
           <div className="player-wrapper" onClick={showOverlay}>
             <ChannelPlayer
+              key={`${currentChannel.id}-${reloadKey}`}
               channel={currentChannel}
               isActive={true}
               onError={handleChannelError}
               onReady={() => showOverlay()}
               muted={muted}
               onToggleMute={() => setMuted(!muted)}
+              onNextChannel={handleNextChannel}
+              onRetry={handleRetryChannel}
+              autoSwitch={autoSwitch}
             />
             <ChannelOverlay
               channel={currentChannel}
@@ -291,6 +396,13 @@ export default function ChannelFeed({ initialChannels, categories }: ChannelFeed
           </div>
           <div className="sidebar-actions">
             <button
+              className={`action-btn-circle ${m3uModalOpen ? 'btn-active' : ''}`}
+              onClick={() => setM3uModalOpen(true)}
+              title="Импортировать M3U плейлист"
+            >
+              📁
+            </button>
+            <button
               className={`action-btn-circle ${searchOpen ? 'btn-active' : ''}`}
               onClick={() => setSearchOpen(!searchOpen)}
               title="Поиск"
@@ -300,7 +412,7 @@ export default function ChannelFeed({ initialChannels, categories }: ChannelFeed
             <button
               className={`action-btn-circle ${filterOpen ? 'btn-active' : ''}`}
               onClick={() => setFilterOpen(true)}
-              title="Фильтры"
+              title="Фильтры и Настройки"
             >
               🎛️
             </button>
@@ -335,8 +447,19 @@ export default function ChannelFeed({ initialChannels, categories }: ChannelFeed
               setActiveIndex(0);
             }}
           >
-            📡 Каналы
+            📡 База
           </button>
+          {customChannels.length > 0 && (
+            <button
+              className={`tab-item ${activeTab === 'custom' ? 'tab-active' : ''}`}
+              onClick={() => {
+                setActiveTab('custom');
+                setActiveIndex(0);
+              }}
+            >
+              📂 Мой M3U ({customChannels.length})
+            </button>
+          )}
           <button
             className={`tab-item ${activeTab === 'favorites' ? 'tab-active' : ''}`}
             onClick={() => {
@@ -344,7 +467,7 @@ export default function ChannelFeed({ initialChannels, categories }: ChannelFeed
               setActiveIndex(0);
             }}
           >
-            ⭐️ Избранное ({favorites.length})
+            ★ Избранное ({favorites.length})
           </button>
           <button
             className={`tab-item ${activeTab === 'history' ? 'tab-active' : ''}`}
@@ -380,6 +503,14 @@ export default function ChannelFeed({ initialChannels, categories }: ChannelFeed
 
         {/* Channel List Container */}
         <div className="channel-list-container">
+          {activeTab === 'custom' && customChannels.length > 0 && (
+            <div className="custom-playlist-actions">
+              <button onClick={handleClearCustomChannels} className="clear-playlist-btn">
+                🗑️ Очистить плейлист
+              </button>
+            </div>
+          )}
+
           {loading && activeList.length === 0 ? (
             <div className="sidebar-status-container">
               <div className="loading-spinner" />
@@ -446,7 +577,7 @@ export default function ChannelFeed({ initialChannels, categories }: ChannelFeed
             <div className="sidebar-status-container">
               <div className="empty-state-icon">📡</div>
               <p>Каналы не найдены</p>
-              <p className="empty-state-subtext">Попробуйте изменить параметры поиска или фильтров</p>
+              <p className="empty-state-subtext">Попробуйте изменить параметры поиска или импортировать плейлист</p>
             </div>
           )}
         </div>
@@ -466,7 +597,62 @@ export default function ChannelFeed({ initialChannels, categories }: ChannelFeed
         activeCountry={activeCountry}
         onCountryChange={handleCountryChange}
         onReset={handleResetFilters}
+        autoSwitch={autoSwitch}
+        onToggleAutoSwitch={handleToggleAutoSwitch}
       />
+
+      {/* M3U Playlist Import Modal */}
+      {m3uModalOpen && (
+        <div className="m3u-modal-overlay" onClick={() => setM3uModalOpen(false)}>
+          <div className="m3u-modal-content" onClick={(e) => e.stopPropagation()}>
+            <div className="m3u-modal-header">
+              <h3>📁 Импорт своего M3U плейлиста</h3>
+              <button onClick={() => setM3uModalOpen(false)} className="m3u-modal-close">✕</button>
+            </div>
+            <div className="m3u-modal-body">
+              <p className="m3u-modal-desc">
+                Вы можете загрузить локальный файл плейлиста `.m3u` / `.m3u8` или указать прямую ссылку на него. Все данные обрабатываются на вашем устройстве.
+              </p>
+              
+              <div className="m3u-modal-field">
+                <label className="m3u-field-label">Прямой URL плейлиста</label>
+                <div className="m3u-url-input-wrap">
+                  <input
+                    type="text"
+                    placeholder="https://example.com/playlist.m3u"
+                    value={m3uUrl}
+                    onChange={(e) => setM3uUrl(e.target.value)}
+                    disabled={m3uFileLoading}
+                    className="m3u-input-text"
+                  />
+                  <button
+                    onClick={handleImportM3UFromUrl}
+                    disabled={m3uFileLoading || !m3uUrl}
+                    className="m3u-btn-import-url"
+                  >
+                    {m3uFileLoading ? 'Загрузка...' : 'Скачать'}
+                  </button>
+                </div>
+              </div>
+
+              <div className="m3u-modal-divider"><span>или</span></div>
+
+              <div className="m3u-modal-field">
+                <label className="m3u-field-label">Выбрать локальный файл M3U</label>
+                <input
+                  type="file"
+                  accept=".m3u,.m3u8"
+                  onChange={handleImportM3UFromFile}
+                  disabled={m3uFileLoading}
+                  className="m3u-input-file"
+                />
+              </div>
+
+              {m3uError && <p className="m3u-modal-error">⚠️ {m3uError}</p>}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

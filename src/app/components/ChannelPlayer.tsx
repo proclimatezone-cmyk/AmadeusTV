@@ -11,6 +11,9 @@ interface ChannelPlayerProps {
   onReady: () => void;
   muted: boolean;
   onToggleMute: () => void;
+  onNextChannel: () => void;
+  onRetry: () => void;
+  autoSwitch: boolean;
 }
 
 const MAX_RETRIES = 2;
@@ -24,6 +27,9 @@ export default function ChannelPlayer({
   onReady,
   muted,
   onToggleMute,
+  onNextChannel,
+  onRetry,
+  autoSwitch,
 }: ChannelPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -158,9 +164,9 @@ export default function ChannelPlayer({
       const hls = new Hls({
         enableWorker: true,
         lowLatencyMode: true,
-        maxBufferLength: 15, // Keep buffer small (15s) for live streams to avoid drift & 404s
-        maxMaxBufferLength: 30, // Max 30s buffer
-        maxBufferSize: 30 * 1024 * 1024, // 30MB
+        maxBufferLength: 45, // Prefetch up to 45s of video ahead for stable streaming on weak networks
+        maxMaxBufferLength: 90, // Max 90s buffer
+        maxBufferSize: 60 * 1024 * 1024, // 60MB
         maxBufferHole: 0.5,
         startLevel: -1,
         
@@ -183,10 +189,12 @@ export default function ChannelPlayer({
 
       loadTimeoutRef.current = setTimeout(() => {
         if (loading && !errorMsg) {
-          console.warn(`[HLS] Load timeout on "${channel.name}", auto-switching`);
+          console.warn(`[HLS] Load timeout on "${channel.name}"`);
           setErrorMsg('Канал не отвечает');
           setLoading(false);
-          onError(channel);
+          if (autoSwitch) {
+            onError(channel);
+          }
         }
       }, LOAD_TIMEOUT_MS);
 
@@ -242,7 +250,9 @@ export default function ChannelPlayer({
 
         setErrorMsg(getErrorMessage(data));
         setLoading(false);
-        onError(channel);
+        if (autoSwitch) {
+          onError(channel);
+        }
       });
 
       hls.loadSource(manifestUrl);
@@ -257,13 +267,17 @@ export default function ChannelPlayer({
       });
       video.addEventListener('error', () => {
         setErrorMsg('Стрим недоступен');
-        onError(channel);
+        if (autoSwitch) {
+          onError(channel);
+        }
       });
     } else {
       setErrorMsg('HLS не поддерживается');
-      onError(channel);
+      if (autoSwitch) {
+        onError(channel);
+      }
     }
-  }, [channel, isActive, proxyUrl, destroyHls, onError, onReady, muted]);
+  }, [channel, isActive, proxyUrl, destroyHls, onError, onReady, muted, autoSwitch]);
 
   useEffect(() => {
     if (isActive) {
@@ -425,10 +439,29 @@ export default function ChannelPlayer({
 
       {/* Error overlay */}
       {errorMsg && (
-        <div className="player-overlay-center">
+        <div className="player-overlay-center player-error-container">
           <div className="error-icon">⚠️</div>
           <p className="error-text">{errorMsg}</p>
-          <p className="error-subtext">Переключение...</p>
+          {autoSwitch ? (
+            <p className="error-subtext">Автопереключение через 3 сек...</p>
+          ) : (
+            <div className="player-error-actions">
+              <button 
+                onClick={(e) => { e.stopPropagation(); onRetry(); }} 
+                className="player-error-btn"
+                title="Попробовать загрузить канал еще раз"
+              >
+                🔄 Повторить
+              </button>
+              <button 
+                onClick={(e) => { e.stopPropagation(); onNextChannel(); }} 
+                className="player-error-btn"
+                title="Перейти к следующему каналу"
+              >
+                ⏭️ Следующий
+              </button>
+            </div>
+          )}
         </div>
       )}
 
