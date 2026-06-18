@@ -1,18 +1,31 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getProxyHeaders, CORS_HEADERS, STRIP_HEADERS } from '@/lib/proxy-headers';
+import { getProxyHeaders, CORS_HEADERS } from '@/lib/proxy-headers';
 
 export const runtime = 'edge';
 
 /**
+ * Checks if the URL or content-type is an HLS manifest.
+ */
+function isManifest(url: string, contentType: string): boolean {
+  const cleanPath = url.split('?')[0].split('#')[0].toLowerCase();
+  const type = contentType.toLowerCase();
+  return (
+    cleanPath.endsWith('.m3u8') ||
+    cleanPath.endsWith('.m3u') ||
+    type.includes('mpegurl') ||
+    type.includes('apple')
+  );
+}
+
+/**
  * Stream proxy — emulates VLC player behavior.
- * Proxies ONLY .m3u8 manifests (~5-50KB), NOT .ts video segments.
- * Converts relative segment URLs to absolute so browser fetches .ts directly from CDN.
+ * Proxies .m3u8 manifests and pipes binary media streams directly.
  */
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
-  const encodedUrl = searchParams.get('url');
+  const rawUrl = searchParams.get('url');
 
-  if (!encodedUrl) {
+  if (!rawUrl) {
     return NextResponse.json(
       { error: 'Missing url parameter' },
       { status: 400, headers: CORS_HEADERS }
@@ -21,45 +34,42 @@ export async function GET(request: NextRequest) {
 
   let targetUrl: string;
   try {
-    targetUrl = atob(encodedUrl);
+    targetUrl = decodeURIComponent(rawUrl);
   } catch {
     return NextResponse.json(
-      { error: 'Invalid base64 url' },
+      { error: 'Invalid URL encoding' },
       { status: 400, headers: CORS_HEADERS }
     );
   }
 
-  // Validate URL
+  // Validate URL structure
   let parsed: URL;
   try {
     parsed = new URL(targetUrl);
   } catch {
     return NextResponse.json(
-      { error: 'Invalid URL' },
+      { error: 'Invalid URL format' },
       { status: 400, headers: CORS_HEADERS }
     );
   }
 
-  // Block internal/localhost URLs
+  // Block internal/localhost IPs to prevent SSRF
   const blockedHosts = ['localhost', '127.0.0.1', '0.0.0.0', '::1', '10.', '192.168.', '172.16.'];
   if (blockedHosts.some(h => parsed.hostname.startsWith(h) || parsed.hostname === h)) {
     return NextResponse.json(
-      { error: 'Blocked host' },
+      { error: 'Forbidden host' },
       { status: 403, headers: CORS_HEADERS }
     );
   }
 
   try {
-    // Build headers — emulate VLC, strip browser fingerprints
+    // Emulate VLC / SmartTV headers
     const proxyHeaders = getProxyHeaders(targetUrl);
-
-    // Strip browser-specific headers from the original request
     const cleanHeaders = new Headers();
     for (const [key, value] of Object.entries(proxyHeaders)) {
       cleanHeaders.set(key, value);
     }
 
-    // Fetch from broadcaster
     const upstream = await fetch(targetUrl, {
       headers: cleanHeaders,
       redirect: 'follow',
@@ -73,30 +83,38 @@ export async function GET(request: NextRequest) {
     }
 
     const contentType = upstream.headers.get('content-type') || '';
-    const body = await upstream.text();
+    
+    // Check if manifest or binary video/stream
+    if (isManifest(targetUrl, contentType)) {
+      const body = await upstream.text();
+      const processedBody = rewriteManifest(body, targetUrl, request.url);
 
-    // If this is an HLS manifest, rewrite relative URLs to absolute
-    let processedBody = body;
-    if (
-      contentType.includes('mpegurl') ||
-      contentType.includes('apple') ||
-      targetUrl.endsWith('.m3u8') ||
-      targetUrl.endsWith('.m3u')
-    ) {
-      processedBody = rewriteManifest(body, targetUrl, request.url);
+      const responseHeaders = new Headers(CORS_HEADERS);
+      responseHeaders.set('Content-Type', contentType || 'application/vnd.apple.mpegurl');
+      responseHeaders.set('Cache-Control', 'no-cache, no-store, must-revalidate');
+
+      return new NextResponse(processedBody, {
+        status: 200,
+        headers: responseHeaders,
+      });
+    } else {
+      // Pipe binary stream directly (avoids hanging and buffer limit errors)
+      const responseHeaders = new Headers(CORS_HEADERS);
+      responseHeaders.set('Content-Type', contentType || 'application/octet-stream');
+      
+      const contentLength = upstream.headers.get('content-length');
+      if (contentLength) {
+        responseHeaders.set('Content-Length', contentLength);
+      }
+      responseHeaders.set('Cache-Control', 'no-cache, no-store, must-revalidate');
+
+      return new NextResponse(upstream.body, {
+        status: 200,
+        headers: responseHeaders,
+      });
     }
-
-    // Return with CORS headers
-    const responseHeaders = new Headers(CORS_HEADERS);
-    responseHeaders.set('Content-Type', contentType || 'application/vnd.apple.mpegurl');
-    responseHeaders.set('Cache-Control', 'no-cache, no-store, must-revalidate');
-
-    return new NextResponse(processedBody, {
-      status: 200,
-      headers: responseHeaders,
-    });
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Unknown proxy error';
+    const message = err instanceof Error ? err.message : 'Unknown stream proxy error';
     return NextResponse.json(
       { error: message },
       { status: 502, headers: CORS_HEADERS }
@@ -104,9 +122,6 @@ export async function GET(request: NextRequest) {
   }
 }
 
-/**
- * Handle CORS preflight.
- */
 export async function OPTIONS() {
   return new NextResponse(null, {
     status: 200,
@@ -116,39 +131,40 @@ export async function OPTIONS() {
 
 /**
  * Rewrite relative URLs in HLS manifests to absolute.
- * Sub-manifests (variant playlists) are routed through our proxy.
+ * Sub-manifests (variant playlists) are routed through our proxy using URL-encoding.
  * .ts segments go directly to the broadcaster's CDN.
  */
 function rewriteManifest(manifest: string, baseUrl: string, proxyBaseUrl: string): string {
   const baseUrlObj = new URL(baseUrl);
   const basePath = baseUrlObj.href.substring(0, baseUrlObj.href.lastIndexOf('/') + 1);
 
-  // Extract our proxy endpoint base
   const proxyUrl = new URL(proxyBaseUrl);
   const proxyBase = `${proxyUrl.origin}${proxyUrl.pathname}`;
 
   const lines = manifest.split('\n');
   const rewritten: string[] = [];
 
+  const isManifestLink = (link: string) => {
+    const clean = link.split('?')[0].split('#')[0].toLowerCase();
+    return clean.endsWith('.m3u8') || clean.endsWith('.m3u');
+  };
+
   for (const line of lines) {
     const trimmed = line.trim();
 
-    // Skip empty lines and comments (pass through)
     if (!trimmed || trimmed.startsWith('#')) {
-      // But check for URI= attributes in #EXT-X-MAP, #EXT-X-KEY etc
+      // Handle URI tags like EXT-X-KEY, EXT-X-MAP, etc.
       if (trimmed.includes('URI="')) {
         const rewrittenLine = trimmed.replace(/URI="([^"]+)"/g, (match, uri) => {
           if (uri.startsWith('http://') || uri.startsWith('https://')) {
-            // Already absolute — proxy sub-manifests, direct for segments
-            if (uri.endsWith('.m3u8') || uri.endsWith('.m3u')) {
-              return `URI="${proxyBase}?url=${btoa(uri)}"`;
+            if (isManifestLink(uri)) {
+              return `URI="${proxyBase}?url=${encodeURIComponent(uri)}"`;
             }
             return `URI="${uri}"`;
           }
-          // Relative → absolute
           const absoluteUri = new URL(uri, basePath).href;
-          if (absoluteUri.endsWith('.m3u8') || absoluteUri.endsWith('.m3u')) {
-            return `URI="${proxyBase}?url=${btoa(absoluteUri)}"`;
+          if (isManifestLink(absoluteUri)) {
+            return `URI="${proxyBase}?url=${encodeURIComponent(absoluteUri)}"`;
           }
           return `URI="${absoluteUri}"`;
         });
@@ -159,31 +175,21 @@ function rewriteManifest(manifest: string, baseUrl: string, proxyBaseUrl: string
       continue;
     }
 
-    // URL line (not a tag)
-    if (!trimmed.startsWith('#')) {
-      if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
-        // Already absolute
-        if (trimmed.endsWith('.m3u8') || trimmed.endsWith('.m3u')) {
-          // Sub-manifest → proxy
-          rewritten.push(`${proxyBase}?url=${btoa(trimmed)}`);
-        } else {
-          // .ts segment → direct
-          rewritten.push(trimmed);
-        }
+    // Rewrite HLS links
+    if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+      if (isManifestLink(trimmed)) {
+        rewritten.push(`${proxyBase}?url=${encodeURIComponent(trimmed)}`);
       } else {
-        // Relative URL → make absolute
-        const absoluteUrl = new URL(trimmed, basePath).href;
-        if (trimmed.endsWith('.m3u8') || trimmed.endsWith('.m3u')) {
-          rewritten.push(`${proxyBase}?url=${btoa(absoluteUrl)}`);
-        } else {
-          // .ts or .aac etc → direct to CDN
-          rewritten.push(absoluteUrl);
-        }
+        rewritten.push(trimmed);
       }
-      continue;
+    } else {
+      const absoluteUrl = new URL(trimmed, basePath).href;
+      if (isManifestLink(trimmed)) {
+        rewritten.push(`${proxyBase}?url=${encodeURIComponent(absoluteUrl)}`);
+      } else {
+        rewritten.push(absoluteUrl);
+      }
     }
-
-    rewritten.push(line);
   }
 
   return rewritten.join('\n');

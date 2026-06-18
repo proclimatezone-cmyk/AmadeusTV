@@ -240,28 +240,36 @@ html, body {
   font-size: 0.8rem;
 }
 
-.mute-btn {
+.player-controls-bottom-right {
   position: absolute;
   bottom: 16px;
   right: 16px;
-  width: 40px;
-  height: 40px;
+  display: flex;
+  gap: 8px;
+  z-index: 30;
+}
+
+.control-btn-player {
+  width: 42px;
+  height: 42px;
   border-radius: var(--radius-full);
-  background: rgba(0, 0, 0, 0.6);
+  background: rgba(13, 13, 21, 0.7);
   border: 1px solid var(--border-glass);
   color: white;
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  z-index: 30;
-  backdrop-filter: blur(5px);
-  transition: var(--transition);
+  backdrop-filter: blur(12px);
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  font-size: 1.15rem;
 }
 
-.mute-btn:hover {
+.control-btn-player:hover {
   background: var(--accent-primary);
   border-color: transparent;
+  box-shadow: var(--shadow-glow);
+  transform: scale(1.08);
 }
 
 .player-actions-overlay {
@@ -315,15 +323,17 @@ html, body {
 }
 
 .brand-title {
-  font-size: 1.25rem;
-  font-weight: 800;
-  letter-spacing: -0.02em;
+  font-size: 1.35rem;
+  font-weight: 900;
+  letter-spacing: -0.03em;
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.5);
 }
 
 .logo-amadeus {
   background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
+  filter: drop-shadow(0 0 8px rgba(230, 57, 70, 0.3));
 }
 
 .logo-tv {
@@ -368,22 +378,36 @@ html, body {
   padding: 10px 16px;
   position: relative;
   border-bottom: 1px solid var(--border-glass);
+  animation: slideDownSearch 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+}
+
+@keyframes slideDownSearch {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .search-input-field {
   width: 100%;
   padding: 8px 32px 8px 12px;
-  background: rgba(255, 255, 255, 0.05);
+  background: rgba(255, 255, 255, 0.03);
   border: 1px solid var(--border-glass);
   border-radius: var(--radius-sm);
   color: white;
   outline: none;
   font-size: 0.85rem;
-  transition: var(--transition);
+  transition: all 0.25s cubic-bezier(0.25, 0.8, 0.25, 1);
 }
 
 .search-input-field:focus {
   border-color: var(--accent-primary);
+  background: rgba(255, 255, 255, 0.06);
+  box-shadow: 0 0 15px rgba(230, 57, 70, 0.15);
 }
 
 .search-clear-btn {
@@ -405,16 +429,17 @@ html, body {
 
 .tab-item {
   flex: 1;
-  padding: 12px 6px;
+  padding: 14px 6px;
   font-size: 0.8rem;
-  font-weight: 600;
+  font-weight: 700;
   text-align: center;
   background: transparent;
   border: none;
   color: var(--text-secondary);
   cursor: pointer;
-  transition: var(--transition);
+  transition: all 0.25s cubic-bezier(0.25, 0.8, 0.25, 1);
   border-bottom: 2px solid transparent;
+  letter-spacing: 0.03em;
 }
 
 .tab-item:hover {
@@ -423,8 +448,9 @@ html, body {
 
 .tab-item.tab-active {
   color: var(--accent-secondary);
-  border-bottom-color: var(--accent-primary);
-  background: rgba(230, 57, 70, 0.03);
+  border-bottom: 2px solid var(--accent-primary);
+  background: rgba(230, 57, 70, 0.05);
+  text-shadow: 0 0 10px rgba(255, 82, 82, 0.3);
 }
 
 /* Categories List */
@@ -437,26 +463,30 @@ html, body {
 }
 
 .category-tag {
-  padding: 5px 12px;
+  padding: 6px 14px;
   font-size: 0.75rem;
+  font-weight: 600;
   background: rgba(255, 255, 255, 0.03);
   border: 1px solid var(--border-glass);
   border-radius: var(--radius-full);
   color: var(--text-secondary);
   cursor: pointer;
   white-space: nowrap;
-  transition: var(--transition);
+  transition: all 0.25s cubic-bezier(0.25, 0.8, 0.25, 1);
 }
 
 .category-tag:hover {
   color: white;
-  border-color: var(--text-muted);
+  border-color: rgba(230, 57, 70, 0.4);
+  background: rgba(255, 255, 255, 0.08);
+  transform: scale(1.05);
 }
 
 .category-tag.cat-active {
-  background: var(--accent-primary);
+  background: linear-gradient(135deg, var(--accent-primary) 0%, var(--accent-secondary) 100%);
   color: white;
   border-color: transparent;
+  box-shadow: 0 4px 15px rgba(230, 57, 70, 0.3);
 }
 
 /* Channel Items */
@@ -476,23 +506,27 @@ html, body {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 10px;
-  border-radius: var(--radius-sm);
+  padding: 11px 12px;
+  border-radius: var(--radius-md);
   background: rgba(255, 255, 255, 0.02);
   border: 1px solid var(--border-glass);
   cursor: pointer;
-  transition: var(--transition);
+  transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+  position: relative;
+  overflow: hidden;
 }
 
 .channel-item-card:hover {
-  background: rgba(255, 255, 255, 0.05);
-  border-color: var(--text-muted);
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(230, 57, 70, 0.3);
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4), 0 0 10px rgba(255, 255, 255, 0.01);
 }
 
 .channel-item-card.item-selected {
-  background: rgba(230, 57, 70, 0.08);
+  background: linear-gradient(135deg, rgba(230, 57, 70, 0.15) 0%, rgba(13, 13, 21, 0.8) 100%);
   border-color: var(--accent-primary);
-  box-shadow: 0 0 10px rgba(230, 57, 70, 0.1);
+  box-shadow: 0 0 20px rgba(230, 57, 70, 0.18), inset 0 0 12px rgba(230, 57, 70, 0.1);
 }
 
 .channel-item-logo {

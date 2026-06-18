@@ -46,9 +46,24 @@ export default function ChannelPlayer({
   const cleanupListenersRef = useRef<(() => void) | null>(null);
 
   const proxyUrl = useCallback((url: string) => {
-    const encoded = btoa(url);
+    const encoded = encodeURIComponent(url);
     return `/api/stream?url=${encoded}`;
   }, []);
+
+  const handleFullscreen = () => {
+    const video = videoRef.current;
+    if (!video) return;
+
+    if (video.requestFullscreen) {
+      video.requestFullscreen();
+    } else if ((video as any).webkitRequestFullscreen) {
+      (video as any).webkitRequestFullscreen();
+    } else if ((video as any).mozRequestFullScreen) {
+      (video as any).mozRequestFullScreen();
+    } else if ((video as any).msRequestFullscreen) {
+      (video as any).msRequestFullscreen();
+    }
+  };
 
   const destroyHls = useCallback(() => {
     if (cleanupListenersRef.current) {
@@ -391,15 +406,24 @@ export default function ChannelPlayer({
         </div>
       )}
 
-      {/* Mute button */}
+      {/* Controls Overlay */}
       {isActive && !errorMsg && !loading && (
-        <button
-          onClick={onToggleMute}
-          className="mute-btn"
-          aria-label={muted ? 'Unmute' : 'Mute'}
-        >
-          {muted ? '🔇' : '🔊'}
-        </button>
+        <div className="player-controls-bottom-right">
+          <button
+            onClick={handleFullscreen}
+            className="control-btn-player"
+            title="Во весь экран"
+          >
+            ⛶
+          </button>
+          <button
+            onClick={onToggleMute}
+            className="control-btn-player"
+            title={muted ? 'Включить звук' : 'Выключить звук'}
+          >
+            {muted ? '🔇' : '🔊'}
+          </button>
+        </div>
       )}
     </div>
   );
