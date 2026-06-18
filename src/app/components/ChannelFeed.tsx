@@ -50,6 +50,7 @@ export default function ChannelFeed({ initialChannels, categories }: ChannelFeed
   const [m3uUrl, setM3uUrl] = useState('');
   const [m3uError, setM3uError] = useState<string | null>(null);
   const [m3uFileLoading, setM3uFileLoading] = useState(false);
+  const [sidebarHidden, setSidebarHidden] = useState(false);
 
   const overlayTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const searchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -348,11 +349,20 @@ export default function ChannelFeed({ initialChannels, categories }: ChannelFeed
   const isCurrentFavorite = currentChannel ? favorites.some(c => c.id === currentChannel.id) : false;
 
   return (
-    <div className="wide-player-layout">
+    <div className={`wide-player-layout ${sidebarHidden ? 'sidebar-hidden' : ''}`}>
       {/* Ambient background glow */}
       <div className="ambient-glow-bg" />
       {/* 1. Main player area */}
       <div className="main-player-section">
+        {sidebarHidden && (
+          <button 
+            className="restore-sidebar-btn"
+            onClick={() => setSidebarHidden(false)}
+            title="Показать список каналов"
+          >
+            📑 Список каналов
+          </button>
+        )}
         {currentChannel ? (
           <div className="player-wrapper" onClick={showOverlay}>
             <ChannelPlayer
@@ -425,6 +435,13 @@ export default function ChannelFeed({ initialChannels, categories }: ChannelFeed
               title="Фильтры и Настройки"
             >
               🎛️
+            </button>
+            <button
+              className="action-btn-circle"
+              onClick={() => setSidebarHidden(true)}
+              title="Скрыть список каналов"
+            >
+              ✕
             </button>
           </div>
         </div>

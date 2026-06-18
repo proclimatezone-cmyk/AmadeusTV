@@ -73,10 +73,24 @@ export default function ChannelPlayer({
 
   const handleFullscreen = () => {
     const container = containerRef.current;
+    const video = videoRef.current;
     if (!container) return;
 
-    if (document.fullscreenElement) {
-      document.exitFullscreen().catch(() => {});
+    const isFullscreen = document.fullscreenElement || 
+                         (document as any).webkitFullscreenElement || 
+                         (document as any).mozFullScreenElement || 
+                         (document as any).msFullscreenElement;
+
+    if (isFullscreen) {
+      if (document.exitFullscreen) {
+        document.exitFullscreen().catch(() => {});
+      } else if ((document as any).webkitExitFullscreen) {
+        (document as any).webkitExitFullscreen();
+      } else if ((document as any).mozCancelFullScreen) {
+        (document as any).mozCancelFullScreen();
+      } else if ((document as any).msExitFullscreen) {
+        (document as any).msExitFullscreen();
+      }
     } else {
       if (container.requestFullscreen) {
         container.requestFullscreen().catch(() => {});
@@ -86,6 +100,12 @@ export default function ChannelPlayer({
         (container as any).mozRequestFullScreen();
       } else if ((container as any).msRequestFullscreen) {
         (container as any).msRequestFullscreen();
+      } else if (video && (video as any).webkitEnterFullscreen) {
+        try {
+          (video as any).webkitEnterFullscreen();
+        } catch (err) {
+          console.error('[Player] webkitEnterFullscreen failed:', err);
+        }
       }
     }
   };
