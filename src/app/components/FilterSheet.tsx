@@ -17,6 +17,8 @@ interface FilterSheetProps {
   onReset: () => void;
   autoSwitch: boolean;
   onToggleAutoSwitch: () => void;
+  forceProxy: boolean;
+  onToggleForceProxy: () => void;
 }
 
 export default function FilterSheet({
@@ -34,6 +36,8 @@ export default function FilterSheet({
   onReset,
   autoSwitch,
   onToggleAutoSwitch,
+  forceProxy,
+  onToggleForceProxy,
 }: FilterSheetProps) {
   if (!isOpen) return null;
 
@@ -124,6 +128,34 @@ export default function FilterSheet({
             />
             <label htmlFor="auto-switch-checkbox" style={{ fontSize: '0.85rem', color: 'var(--text-primary)', cursor: 'pointer', fontWeight: 600 }}>
               Автопереключение при ошибках
+            </label>
+          </div>
+
+          {/* Force Proxy Settings */}
+          <div 
+            className="filter-group" 
+            style={{ 
+              flexDirection: 'row', 
+              alignItems: 'center', 
+              gap: '10px', 
+              cursor: 'pointer', 
+              marginTop: '12px',
+              background: 'rgba(255, 255, 255, 0.02)',
+              padding: '12px',
+              borderRadius: 'var(--radius-sm)',
+              border: '1px solid var(--border-glass)'
+            }} 
+            onClick={onToggleForceProxy}
+          >
+            <input
+              type="checkbox"
+              id="force-proxy-checkbox"
+              checked={forceProxy}
+              onChange={() => {}} // Handled by onClick
+              style={{ width: '18px', height: '18px', accentColor: 'var(--accent-primary)', cursor: 'pointer' }}
+            />
+            <label htmlFor="force-proxy-checkbox" style={{ fontSize: '0.85rem', color: 'var(--text-primary)', cursor: 'pointer', fontWeight: 600 }}>
+              Принудительно через прокси
             </label>
           </div>
         </div>

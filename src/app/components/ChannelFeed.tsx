@@ -42,8 +42,9 @@ export default function ChannelFeed({ initialChannels, categories }: ChannelFeed
   const [filterOpen, setFilterOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   
-  // Iteration 3 states
+  // Iteration 3 & 4 states
   const [autoSwitch, setAutoSwitch] = useState(false);
+  const [forceProxy, setForceProxy] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
   const [m3uModalOpen, setM3uModalOpen] = useState(false);
   const [m3uUrl, setM3uUrl] = useState('');
@@ -55,17 +56,19 @@ export default function ChannelFeed({ initialChannels, categories }: ChannelFeed
   const pageRef = useRef(1);
   const hasMoreRef = useRef(true);
 
-  // Sync favorites, history & custom channels on mount
+  // Sync favorites, history, custom channels & options on mount
   useEffect(() => {
     const savedFavs = localStorage.getItem('amadeus_favorites');
     const savedHist = localStorage.getItem('amadeus_history');
     const savedCustom = localStorage.getItem('amadeus_custom_channels');
     const savedAutoSwitch = localStorage.getItem('amadeus_autoswitch');
+    const savedForceProxy = localStorage.getItem('amadeus_forceproxy');
     
     if (savedFavs) setFavorites(JSON.parse(savedFavs));
     if (savedHist) setHistory(JSON.parse(savedHist));
     if (savedCustom) setCustomChannels(JSON.parse(savedCustom));
     if (savedAutoSwitch) setAutoSwitch(savedAutoSwitch === 'true');
+    if (savedForceProxy) setForceProxy(savedForceProxy === 'true');
   }, []);
 
   // Fetch channels from API
@@ -213,6 +216,12 @@ export default function ChannelFeed({ initialChannels, categories }: ChannelFeed
     localStorage.setItem('amadeus_autoswitch', nextVal ? 'true' : 'false');
   };
 
+  const handleToggleForceProxy = () => {
+    const nextVal = !forceProxy;
+    setForceProxy(nextVal);
+    localStorage.setItem('amadeus_forceproxy', nextVal ? 'true' : 'false');
+  };
+
   const handleImportM3U = async (text: string) => {
     setM3uFileLoading(true);
     setM3uError(null);
@@ -357,6 +366,7 @@ export default function ChannelFeed({ initialChannels, categories }: ChannelFeed
               onNextChannel={handleNextChannel}
               onRetry={handleRetryChannel}
               autoSwitch={autoSwitch}
+              forceProxy={forceProxy}
             />
             <ChannelOverlay
               channel={currentChannel}
@@ -599,6 +609,8 @@ export default function ChannelFeed({ initialChannels, categories }: ChannelFeed
         onReset={handleResetFilters}
         autoSwitch={autoSwitch}
         onToggleAutoSwitch={handleToggleAutoSwitch}
+        forceProxy={forceProxy}
+        onToggleForceProxy={handleToggleForceProxy}
       />
 
       {/* M3U Playlist Import Modal */}

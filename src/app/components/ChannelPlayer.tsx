@@ -14,6 +14,7 @@ interface ChannelPlayerProps {
   onNextChannel: () => void;
   onRetry: () => void;
   autoSwitch: boolean;
+  forceProxy: boolean;
 }
 
 const MAX_RETRIES = 2;
@@ -30,6 +31,7 @@ export default function ChannelPlayer({
   onNextChannel,
   onRetry,
   autoSwitch,
+  forceProxy,
 }: ChannelPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -41,6 +43,12 @@ export default function ChannelPlayer({
   const [buffering, setBuffering] = useState(false);
   const [isPlaying, setIsPlaying] = useState(true);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [useProxyState, setUseProxyState] = useState(false);
+
+  // Reset useProxyState back to false when channel changes
+  useEffect(() => {
+    setUseProxyState(false);
+  }, [channel.id]);
 
   // Gesture-controlled HUD states
   const [hudVolume, setHudVolume] = useState<number | null>(null); // 0-100
@@ -126,7 +134,9 @@ export default function ChannelPlayer({
     setIsLive(false);
     retryCountRef.current = 0;
 
-    const manifestUrl = proxyUrl(channel.url);
+    const shouldProxy = forceProxy || useProxyState;
+    const manifestUrl = shouldProxy ? proxyUrl(channel.url) : channel.url;
+    console.log(`[Player] Initializing "${channel.name}". Mode: ${shouldProxy ? 'PROXY' : 'DIRECT'}. URL: ${manifestUrl}`);
 
     // Apply saved volume/mute settings
     const savedVol = localStorage.getItem('amadeus_player_volume');
@@ -189,11 +199,16 @@ export default function ChannelPlayer({
 
       loadTimeoutRef.current = setTimeout(() => {
         if (loading && !errorMsg) {
-          console.warn(`[HLS] Load timeout on "${channel.name}"`);
-          setErrorMsg('Канал не отвечает');
-          setLoading(false);
-          if (autoSwitch) {
-            onError(channel);
+          if (!shouldProxy) {
+            console.warn(`[Player] Direct load timeout on "${channel.name}". Retrying via proxy.`);
+            setUseProxyState(true);
+          } else {
+            console.warn(`[Player] Proxy load timeout on "${channel.name}"`);
+            setErrorMsg('Канал не отвечает');
+            setLoading(false);
+            if (autoSwitch) {
+              onError(channel);
+            }
           }
         }
       }, LOAD_TIMEOUT_MS);
@@ -248,10 +263,15 @@ export default function ChannelPlayer({
           }
         }
 
-        setErrorMsg(getErrorMessage(data));
-        setLoading(false);
-        if (autoSwitch) {
-          onError(channel);
+        if (!shouldProxy) {
+          console.warn(`[Player] Network error in direct mode. Falling back to proxy.`);
+          setUseProxyState(true);
+        } else {
+          setErrorMsg(getErrorMessage(data));
+          setLoading(false);
+          if (autoSwitch) {
+            onError(channel);
+          }
         }
       });
 
@@ -266,18 +286,27 @@ export default function ChannelPlayer({
         onReady();
       });
       video.addEventListener('error', () => {
-        setErrorMsg('Стрим недоступен');
-        if (autoSwitch) {
-          onError(channel);
+        if (!shouldProxy) {
+          console.warn(`[Player] Native error in direct mode. Falling back to proxy.`);
+          setUseProxyState(true);
+        } else {
+          setErrorMsg('Стрим недоступен');
+          if (autoSwitch) {
+            onError(channel);
+          }
         }
       });
     } else {
-      setErrorMsg('HLS не поддерживается');
-      if (autoSwitch) {
-        onError(channel);
+      if (!shouldProxy) {
+        setUseProxyState(true);
+      } else {
+        setErrorMsg('HLS не поддерживается');
+        if (autoSwitch) {
+          onError(channel);
+        }
       }
     }
-  }, [channel, isActive, proxyUrl, destroyHls, onError, onReady, muted, autoSwitch]);
+  }, [channel, isActive, proxyUrl, destroyHls, onError, onReady, muted, autoSwitch, forceProxy, useProxyState]);
 
   useEffect(() => {
     if (isActive) {

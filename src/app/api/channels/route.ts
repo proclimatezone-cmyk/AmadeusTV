@@ -12,29 +12,32 @@ export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const action = searchParams.get('action') || 'list';
 
+  const responseHeaders = new Headers(CORS_HEADERS);
+  responseHeaders.set('Cache-Control', 'public, max-age=600, s-maxage=3600');
+
   try {
     switch (action) {
       case 'categories': {
         const categories = getCategories();
-        return NextResponse.json({ categories }, { headers: CORS_HEADERS });
+        return NextResponse.json({ categories }, { headers: responseHeaders });
       }
 
       case 'languages': {
         const category = searchParams.get('category') || undefined;
         const languages = getLanguagesForCategory(category);
-        return NextResponse.json({ languages }, { headers: CORS_HEADERS });
+        return NextResponse.json({ languages }, { headers: responseHeaders });
       }
 
       case 'countries': {
         const category = searchParams.get('category') || undefined;
         const countries = getCountriesForCategory(category);
-        return NextResponse.json({ countries }, { headers: CORS_HEADERS });
+        return NextResponse.json({ countries }, { headers: responseHeaders });
       }
 
       case 'f1': {
         const language = searchParams.get('language') || undefined;
         const channels = getF1Channels(language);
-        return NextResponse.json({ channels, total: channels.length }, { headers: CORS_HEADERS });
+        return NextResponse.json({ channels, total: channels.length }, { headers: responseHeaders });
       }
 
       case 'list':
@@ -47,14 +50,14 @@ export async function GET(request: NextRequest) {
         const limit = parseInt(searchParams.get('limit') || '20', 10);
 
         const result = getChannels({ category, language, country, search, page, limit });
-        return NextResponse.json(result, { headers: CORS_HEADERS });
+        return NextResponse.json(result, { headers: responseHeaders });
       }
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Internal error';
     return NextResponse.json(
       { error: message },
-      { status: 500, headers: CORS_HEADERS }
+      { status: 500, headers: responseHeaders }
     );
   }
 }
