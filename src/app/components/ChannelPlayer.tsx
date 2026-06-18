@@ -41,6 +41,11 @@ export default function ChannelPlayer({
   const [hudSeekTarget, setHudSeekTarget] = useState<string | null>(null); // e.g. "01:23"
   const [isLive, setIsLive] = useState(false);
 
+  // Video quality levels
+  const [levels, setLevels] = useState<{ index: number; name: string }[]>([]);
+  const [currentLevel, setCurrentLevel] = useState<number>(-2); // -2 = uninitialized, -1 = Auto
+  const [qualityMenuOpen, setQualityMenuOpen] = useState(false);
+
   // Touch gesture refs
   const touchStartRef = useRef<{ x: number; y: number; vol: number; time: number } | null>(null);
   const gestureTypeRef = useRef<'volume' | 'seek' | null>(null);
@@ -84,6 +89,9 @@ export default function ChannelPlayer({
       hlsRef.current = null;
     }
     setBuffering(false);
+    setLevels([]);
+    setCurrentLevel(-2);
+    setQualityMenuOpen(false);
   }, []);
 
   const initPlayer = useCallback(() => {
@@ -129,26 +137,27 @@ export default function ChannelPlayer({
       const hls = new Hls({
         enableWorker: true,
         lowLatencyMode: false,
-        maxBufferLength: 60, // 60s buffer to prevent stalls on slow internet
-        maxMaxBufferLength: 120,
+        maxBufferLength: 120, // 2 minutes of buffering ahead like YouTube
+        maxMaxBufferLength: 240, // Up to 4 minutes ahead
+        maxBufferSize: 150 * 1024 * 1024, // 150MB memory buffer size limit
         maxBufferHole: 0.5,
         startLevel: -1,
         
-        manifestLoadingTimeOut: 12000,
-        manifestLoadingMaxRetry: 4,
+        manifestLoadingTimeOut: 15000,
+        manifestLoadingMaxRetry: 6,
         manifestLoadingRetryDelay: 1000,
         
-        levelLoadingTimeOut: 12000,
-        levelLoadingMaxRetry: 4,
+        levelLoadingTimeOut: 15000,
+        levelLoadingMaxRetry: 6,
         levelLoadingRetryDelay: 1000,
         
-        fragLoadingTimeOut: 15000,
-        fragLoadingMaxRetry: 6,
+        fragLoadingTimeOut: 20000,
+        fragLoadingMaxRetry: 8,
         fragLoadingRetryDelay: 1000,
         
-        abrBandWidthFactor: 0.8,
-        abrBandWidthUpFactor: 0.6,
-        abrEwmaDefaultEstimate: 400000,
+        abrBandWidthFactor: 0.85,
+        abrBandWidthUpFactor: 0.65,
+        abrEwmaDefaultEstimate: 500000,
       });
 
       loadTimeoutRef.current = setTimeout(() => {
@@ -168,10 +177,22 @@ export default function ChannelPlayer({
         setLoading(false);
         video.play().catch(() => {});
         onReady();
+
+        // Load available quality levels
+        const hlsLevels = hls.levels.map((level, idx) => ({
+          index: idx,
+          name: level.height ? `${level.height}p` : `Качество ${idx + 1}`,
+        }));
+        setLevels([{ index: -1, name: 'Авто' }, ...hlsLevels]);
+        setCurrentLevel(hls.currentLevel);
       });
 
       hls.on(Events.LEVEL_LOADED, (_event, data) => {
         setIsLive(data.details.live);
+      });
+
+      hls.on(Events.LEVEL_SWITCHED, (_event, data) => {
+        setCurrentLevel(data.level);
       });
 
       hls.on(Events.ERROR, (_event: string, data: ErrorData) => {
@@ -415,6 +436,41 @@ export default function ChannelPlayer({
       {/* Controls Overlay */}
       {isActive && !errorMsg && !loading && (
         <div className="player-controls-bottom-right">
+          {/* Quality Selector */}
+          {levels.length > 0 && (
+            <div className="player-quality-selector-wrap">
+              <button
+                onClick={() => setQualityMenuOpen(!qualityMenuOpen)}
+                className={`control-btn-player ${qualityMenuOpen ? 'btn-active' : ''}`}
+                title="Выбор качества"
+              >
+                ⚙️ {currentLevel === -1 ? 'Авто' : levels.find(l => l.index === currentLevel)?.name || ''}
+              </button>
+              {qualityMenuOpen && (
+                <div className="player-quality-menu">
+                  {levels.map((lvl) => {
+                    const isSelected = lvl.index === currentLevel;
+                    return (
+                      <button
+                        key={lvl.index}
+                        onClick={() => {
+                          if (hlsRef.current) {
+                            hlsRef.current.currentLevel = lvl.index;
+                            setCurrentLevel(lvl.index);
+                          }
+                          setQualityMenuOpen(false);
+                        }}
+                        className={`quality-menu-item ${isSelected ? 'selected' : ''}`}
+                      >
+                        {lvl.name} {isSelected && '✓'}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+
           <button
             onClick={handleFullscreen}
             className="control-btn-player"
