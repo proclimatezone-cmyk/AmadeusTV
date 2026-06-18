@@ -410,9 +410,8 @@ export default function ChannelFeed({ initialChannels, categories }: ChannelFeed
       <div className="sidebar-section">
         <div className="sidebar-header">
           <div className="brand-title">
-            <span className="logo-amadeus">Amadeus</span>
-            <span className="logo-tv">TV</span>
-            <span className="logo-mn">by MN</span>
+            <span className="logo-amadeus">amadeusTV</span>
+            <span className="logo-tv">.vercel.app</span>
           </div>
           <div className="sidebar-actions">
             <button

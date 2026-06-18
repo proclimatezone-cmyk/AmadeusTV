@@ -19,7 +19,7 @@ interface ChannelPlayerProps {
 
 const MAX_RETRIES = 2;
 const RETRY_DELAY_MS = 1000;
-const LOAD_TIMEOUT_MS = 8000;
+const LOAD_TIMEOUT_MS = 5000;
 
 export default function ChannelPlayer({
   channel,
@@ -52,8 +52,6 @@ export default function ChannelPlayer({
 
   // Player controls state
   const [duration, setDuration] = useState(0);
-  const [currentTime, setCurrentTime] = useState(0);
-  const [bufferedEnd, setBufferedEnd] = useState(0);
   const [controlsVisible, setControlsVisible] = useState(true);
   const [volume, setVolume] = useState(0.5);
   const [showDoubleTapFeedback, setShowDoubleTapFeedback] = useState<'left' | 'right' | null>(null);
@@ -68,6 +66,10 @@ export default function ChannelPlayer({
   const [levels, setLevels] = useState<{ index: number; name: string }[]>([]);
   const [currentLevel, setCurrentLevel] = useState<number>(-2); // -2 = uninitialized, -1 = Auto
   const [qualityMenuOpen, setQualityMenuOpen] = useState(false);
+
+  // DOM Refs to prevent React re-renders during playback
+  const timelineSliderRef = useRef<HTMLInputElement>(null);
+  const timeCurrentRef = useRef<HTMLSpanElement>(null);
 
   // Touch gesture refs
   const touchStartRef = useRef<{ x: number; y: number; vol: number; time: number } | null>(null);
@@ -189,9 +191,16 @@ export default function ChannelPlayer({
     setErrorMsg(null);
     setIsLive(false);
     setDuration(0);
-    setCurrentTime(0);
-    setBufferedEnd(0);
     retryCountRef.current = 0;
+
+    if (timelineSliderRef.current) {
+      timelineSliderRef.current.value = '0';
+      timelineSliderRef.current.style.setProperty('--progress-percent', '0%');
+      timelineSliderRef.current.style.setProperty('--buffer-percent', '0%');
+    }
+    if (timeCurrentRef.current) {
+      timeCurrentRef.current.innerText = '00:00';
+    }
 
     const shouldProxy = forceProxy || useProxyState;
     const manifestUrl = shouldProxy ? proxyUrl(channel.url) : channel.url;
@@ -394,8 +403,19 @@ export default function ChannelPlayer({
   // Video Events Handlers
   const handleTimeUpdate = () => {
     const video = videoRef.current;
+    const slider = timelineSliderRef.current;
+    const timeText = timeCurrentRef.current;
     if (!video) return;
-    setCurrentTime(video.currentTime);
+
+    const curTime = video.currentTime;
+    if (slider) {
+      slider.value = curTime.toString();
+      const dur = video.duration || 1;
+      slider.style.setProperty('--progress-percent', `${(curTime / dur) * 100}%`);
+    }
+    if (timeText) {
+      timeText.innerText = formatTime(curTime);
+    }
   };
 
   const handleDurationChange = () => {
@@ -407,7 +427,9 @@ export default function ChannelPlayer({
 
   const handleProgress = () => {
     const video = videoRef.current;
-    if (!video || !video.buffered.length) return;
+    const slider = timelineSliderRef.current;
+    if (!video || !video.buffered.length || !slider) return;
+
     const curTime = video.currentTime;
     let bufEnd = 0;
     for (let i = 0; i < video.buffered.length; i++) {
@@ -416,7 +438,8 @@ export default function ChannelPlayer({
         break;
       }
     }
-    setBufferedEnd(bufEnd);
+    const dur = video.duration || 1;
+    slider.style.setProperty('--buffer-percent', `${(bufEnd / dur) * 100}%`);
   };
 
   const handleSeekChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -424,7 +447,10 @@ export default function ChannelPlayer({
     if (!video) return;
     const targetTime = parseFloat(e.target.value);
     video.currentTime = targetTime;
-    setCurrentTime(targetTime);
+    e.target.style.setProperty('--progress-percent', `${(targetTime / (video.duration || 1)) * 100}%`);
+    if (timeCurrentRef.current) {
+      timeCurrentRef.current.innerText = formatTime(targetTime);
+    }
   };
 
   const handleVolumeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -726,20 +752,17 @@ export default function ChannelPlayer({
             {!isLive && duration > 0 ? (
               <div className="player-timeline-slider-wrapper" onClick={(e) => e.stopPropagation()}>
                 <input
+                  ref={timelineSliderRef}
                   type="range"
                   min={0}
                   max={duration}
                   step={0.1}
-                  value={currentTime}
+                  defaultValue={0}
                   onChange={handleSeekChange}
                   onClick={(e) => e.stopPropagation()}
                   onTouchStart={(e) => e.stopPropagation()}
                   onTouchEnd={(e) => e.stopPropagation()}
                   className="player-timeline-slider"
-                  style={{
-                    '--progress-percent': `${(currentTime / duration) * 100}%`,
-                    '--buffer-percent': `${(bufferedEnd / duration) * 100}%`,
-                  } as React.CSSProperties}
                 />
               </div>
             ) : (
@@ -798,7 +821,7 @@ export default function ChannelPlayer({
 
               {!isLive && duration > 0 && (
                 <div className="player-time-display">
-                  <span className="time-current">{formatTime(currentTime)}</span>
+                  <span ref={timeCurrentRef} className="time-current">00:00</span>
                   <span className="time-separator">/</span>
                   <span className="time-duration">{formatTime(duration)}</span>
                 </div>
