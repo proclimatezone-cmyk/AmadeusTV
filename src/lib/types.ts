@@ -173,3 +173,54 @@ export function normalizeCategory(groupTitle: string): string {
 
   return 'other';
 }
+
+export const COUNTRY_MAP: Record<string, string> = {
+  ru: '🇷🇺 Россия',
+  us: '🇺🇸 США',
+  gb: '🇬🇧 Великобритания',
+  ua: '🇺🇦 Украина',
+  by: '🇧🇾 Беларусь',
+  kz: '🇰🇿 Казахстан',
+  de: '🇩🇪 Германия',
+  fr: '🇫🇷 Франция',
+  it: '🇮🇹 Италия',
+  es: '🇪🇸 Испания',
+  ca: '🇨🇦 Канада',
+  au: '🇦🇺 Австралия',
+  nl: '🇳🇱 Нидерланды',
+  pl: '🇵🇱 Польша',
+  tr: '🇹🇷 Турция',
+  br: '🇧🇷 Бразилия',
+  jp: '🇯🇵 Япония',
+  cn: '🇨🇳 Китай',
+  kr: '🇰🇷 Южная Корея',
+  in: '🇮🇳 Индия',
+  fi: '🇫🇮 Финляндия',
+  se: '🇸🇪 Швеция',
+  no: '🇳🇴 Норвегия',
+  dk: '🇩🇰 Дания',
+  at: '🇦🇹 Австрия',
+  ch: '🇨🇭 Швейцария',
+  be: '🇧🇪 Бельгия',
+  ie: '🇮🇪 Ирландия',
+  pt: '🇵🇹 Португалия',
+  gr: '🇬🇷 Греция',
+  ro: '🇷🇴 Румыния',
+  hu: '🇭🇺 Венгрия',
+  cz: '🇨🇿 Чехия',
+  bg: '🇧🇬 Болгария',
+  hr: '🇭🇷 Хорватия',
+  rs: '🇷🇸 Сербия',
+  sk: '🇸🇰 Словакия',
+  si: '🇸🇮 Словения',
+  lt: '🇱🇹 Литва',
+  lv: '🇱🇻 Латвия',
+  ee: '🇪🇪 Эстония',
+};
+
+export function normalizeCountry(code?: string): string {
+  if (!code) return 'Другие';
+  const c = code.toLowerCase().trim();
+  return COUNTRY_MAP[c] || code.toUpperCase();
+}
+

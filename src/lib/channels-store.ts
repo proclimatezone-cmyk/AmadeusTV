@@ -1,4 +1,4 @@
-import { Channel, ChannelCategory, CATEGORY_MAP, normalizeLanguage } from './types';
+import { Channel, ChannelCategory, CATEGORY_MAP, normalizeLanguage, normalizeCountry } from './types';
 import channelsData from '../../data/channels.json';
 
 // In-memory channel store loaded from pre-built JSON
@@ -11,11 +11,12 @@ const allChannels: Channel[] = channelsData as Channel[];
 export function getChannels(options: {
   category?: string;
   language?: string;
+  country?: string;
   search?: string;
   page?: number;
   limit?: number;
 }): { channels: Channel[]; total: number; hasMore: boolean } {
-  const { category, language, search, page = 1, limit = 20 } = options;
+  const { category, language, country, search, page = 1, limit = 20 } = options;
 
   let filtered = allChannels;
 
@@ -27,6 +28,11 @@ export function getChannels(options: {
   // Filter by language
   if (language && language !== 'all') {
     filtered = filtered.filter(ch => ch.langCode === language);
+  }
+
+  // Filter by country
+  if (country && country !== 'all') {
+    filtered = filtered.filter(ch => ch.country?.toLowerCase() === country.toLowerCase());
   }
 
   // Search by name
@@ -141,3 +147,42 @@ export function getF1Channels(language?: string): Channel[] {
 
   return f1;
 }
+
+/**
+ * Get available countries for a given category.
+ */
+export function getCountriesForCategory(category?: string): { code: string; name: string; count: number }[] {
+  let filtered = allChannels;
+  if (category && category !== 'all') {
+    filtered = filtered.filter(ch => ch.group === category);
+  }
+
+  const countryCounts = new Map<string, number>();
+  for (const ch of filtered) {
+    const code = ch.country?.toLowerCase() || '';
+    if (!code) continue; // Skip channels with no country
+    countryCounts.set(code, (countryCounts.get(code) || 0) + 1);
+  }
+
+  const countries = Array.from(countryCounts.entries())
+    .map(([code, count]) => ({
+      code,
+      name: normalizeCountry(code),
+      count,
+    }))
+    .sort((a, b) => {
+      // Russia first
+      if (a.code === 'ru') return -1;
+      if (b.code === 'ru') return 1;
+      // Then US
+      if (a.code === 'us') return -1;
+      if (b.code === 'us') return 1;
+      // Then UK
+      if (a.code === 'gb') return -1;
+      if (b.code === 'gb') return 1;
+      return b.count - a.count;
+    });
+
+  return countries;
+}
+

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getChannels, getCategories, getLanguagesForCategory, getF1Channels } from '@/lib/channels-store';
+import { getChannels, getCategories, getLanguagesForCategory, getF1Channels, getCountriesForCategory } from '@/lib/channels-store';
 import { CORS_HEADERS } from '@/lib/proxy-headers';
 
 /**
@@ -25,6 +25,12 @@ export async function GET(request: NextRequest) {
         return NextResponse.json({ languages }, { headers: CORS_HEADERS });
       }
 
+      case 'countries': {
+        const category = searchParams.get('category') || undefined;
+        const countries = getCountriesForCategory(category);
+        return NextResponse.json({ countries }, { headers: CORS_HEADERS });
+      }
+
       case 'f1': {
         const language = searchParams.get('language') || undefined;
         const channels = getF1Channels(language);
@@ -35,11 +41,12 @@ export async function GET(request: NextRequest) {
       default: {
         const category = searchParams.get('category') || undefined;
         const language = searchParams.get('language') || undefined;
+        const country = searchParams.get('country') || undefined;
         const search = searchParams.get('search') || undefined;
         const page = parseInt(searchParams.get('page') || '1', 10);
         const limit = parseInt(searchParams.get('limit') || '20', 10);
 
-        const result = getChannels({ category, language, search, page, limit });
+        const result = getChannels({ category, language, country, search, page, limit });
         return NextResponse.json(result, { headers: CORS_HEADERS });
       }
     }

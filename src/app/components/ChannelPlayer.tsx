@@ -13,9 +13,9 @@ interface ChannelPlayerProps {
   onToggleMute: () => void;
 }
 
-const MAX_RETRIES = 1;
-const RETRY_DELAY_MS = 1000;
-const LOAD_TIMEOUT_MS = 8000;
+const MAX_RETRIES = 5;
+const RETRY_DELAY_MS = 2000;
+const LOAD_TIMEOUT_MS = 15000;
 
 export default function ChannelPlayer({
   channel,
@@ -29,8 +29,21 @@ export default function ChannelPlayer({
   const hlsRef = useRef<Hls | null>(null);
   const retryCountRef = useRef(0);
   const loadTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  
   const [loading, setLoading] = useState(true);
+  const [buffering, setBuffering] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  // Gesture-controlled HUD states
+  const [hudVolume, setHudVolume] = useState<number | null>(null); // 0-100
+  const [hudSeekDelta, setHudSeekDelta] = useState<number | null>(null); // in seconds
+  const [hudSeekTarget, setHudSeekTarget] = useState<string | null>(null); // e.g. "01:23"
+  const [isLive, setIsLive] = useState(false);
+
+  // Touch gesture refs
+  const touchStartRef = useRef<{ x: number; y: number; vol: number; time: number } | null>(null);
+  const gestureTypeRef = useRef<'volume' | 'seek' | null>(null);
+  const cleanupListenersRef = useRef<(() => void) | null>(null);
 
   const proxyUrl = useCallback((url: string) => {
     const encoded = btoa(url);
@@ -38,6 +51,10 @@ export default function ChannelPlayer({
   }, []);
 
   const destroyHls = useCallback(() => {
+    if (cleanupListenersRef.current) {
+      cleanupListenersRef.current();
+      cleanupListenersRef.current = null;
+    }
     if (loadTimeoutRef.current) {
       clearTimeout(loadTimeoutRef.current);
       loadTimeoutRef.current = null;
@@ -46,6 +63,7 @@ export default function ChannelPlayer({
       hlsRef.current.destroy();
       hlsRef.current = null;
     }
+    setBuffering(false);
   }, []);
 
   const initPlayer = useCallback(() => {
@@ -54,27 +72,65 @@ export default function ChannelPlayer({
 
     destroyHls();
     setLoading(true);
+    setBuffering(false);
     setErrorMsg(null);
+    setIsLive(false);
     retryCountRef.current = 0;
 
-    // Use proxy for the manifest URL
     const manifestUrl = proxyUrl(channel.url);
+
+    // Apply saved volume/mute settings
+    const savedVol = localStorage.getItem('amadeus_player_volume');
+    const savedMuted = localStorage.getItem('amadeus_player_muted');
+    if (savedVol !== null) {
+      video.volume = parseFloat(savedVol);
+    } else {
+      video.volume = 0.5; // default
+    }
+    if (savedMuted !== null) {
+      video.muted = savedMuted === 'true';
+    } else {
+      video.muted = muted;
+    }
+
+    // Attach HTML5 buffering listeners
+    const handleWaiting = () => setBuffering(true);
+    const handlePlaying = () => setBuffering(false);
+    
+    video.addEventListener('waiting', handleWaiting);
+    video.addEventListener('playing', handlePlaying);
+    
+    cleanupListenersRef.current = () => {
+      video.removeEventListener('waiting', handleWaiting);
+      video.removeEventListener('playing', handlePlaying);
+    };
 
     if (Hls.isSupported()) {
       const hls = new Hls({
         enableWorker: true,
         lowLatencyMode: false,
-        maxBufferLength: 30,
-        maxMaxBufferLength: 60,
+        maxBufferLength: 60, // 60s buffer to prevent stalls on slow internet
+        maxMaxBufferLength: 120,
         maxBufferHole: 0.5,
         startLevel: -1,
-        manifestLoadingTimeOut: 8000,
-        manifestLoadingMaxRetry: 1,
-        levelLoadingTimeOut: 8000,
-        fragLoadingTimeOut: 10000,
+        
+        manifestLoadingTimeOut: 12000,
+        manifestLoadingMaxRetry: 4,
+        manifestLoadingRetryDelay: 1000,
+        
+        levelLoadingTimeOut: 12000,
+        levelLoadingMaxRetry: 4,
+        levelLoadingRetryDelay: 1000,
+        
+        fragLoadingTimeOut: 15000,
+        fragLoadingMaxRetry: 6,
+        fragLoadingRetryDelay: 1000,
+        
+        abrBandWidthFactor: 0.8,
+        abrBandWidthUpFactor: 0.6,
+        abrEwmaDefaultEstimate: 400000,
       });
 
-      // Failsafe: if nothing loads in LOAD_TIMEOUT_MS, force switch
       loadTimeoutRef.current = setTimeout(() => {
         if (loading && !errorMsg) {
           console.warn(`[HLS] Load timeout on "${channel.name}", auto-switching`);
@@ -84,7 +140,7 @@ export default function ChannelPlayer({
         }
       }, LOAD_TIMEOUT_MS);
 
-      hls.on(Events.MANIFEST_PARSED, () => {
+      hls.on(Events.MANIFEST_PARSED, (_event, data) => {
         if (loadTimeoutRef.current) {
           clearTimeout(loadTimeoutRef.current);
           loadTimeoutRef.current = null;
@@ -94,27 +150,27 @@ export default function ChannelPlayer({
         onReady();
       });
 
+      hls.on(Events.LEVEL_LOADED, (_event, data) => {
+        setIsLive(data.details.live);
+      });
+
       hls.on(Events.ERROR, (_event: string, data: ErrorData) => {
         if (!data.fatal) return;
 
         console.warn(`[HLS] Fatal error on "${channel.name}":`, data.type, data.details);
 
         if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
-          // Try media recovery first
           if (retryCountRef.current < MAX_RETRIES) {
             retryCountRef.current++;
-            console.log(`[HLS] Attempting media recovery (${retryCountRef.current}/${MAX_RETRIES})`);
             hls.recoverMediaError();
             return;
           }
         }
 
         if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
-          // Retry with backoff
           if (retryCountRef.current < MAX_RETRIES) {
             retryCountRef.current++;
             const delay = RETRY_DELAY_MS * retryCountRef.current;
-            console.log(`[HLS] Network retry in ${delay}ms (${retryCountRef.current}/${MAX_RETRIES})`);
             setTimeout(() => {
               hls.startLoad();
             }, delay);
@@ -122,7 +178,6 @@ export default function ChannelPlayer({
           }
         }
 
-        // All retries exhausted — signal auto-switch
         setErrorMsg(getErrorMessage(data));
         setLoading(false);
         onError(channel);
@@ -132,7 +187,6 @@ export default function ChannelPlayer({
       hls.attachMedia(video);
       hlsRef.current = hls;
     } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-      // Native HLS (Safari)
       video.src = manifestUrl;
       video.addEventListener('loadedmetadata', () => {
         setLoading(false);
@@ -140,16 +194,15 @@ export default function ChannelPlayer({
         onReady();
       });
       video.addEventListener('error', () => {
-        setErrorMsg('Stream unavailable');
+        setErrorMsg('Стрим недоступен');
         onError(channel);
       });
     } else {
-      setErrorMsg('HLS not supported');
+      setErrorMsg('HLS не поддерживается');
       onError(channel);
     }
-  }, [channel, isActive, proxyUrl, destroyHls, onError, onReady]);
+  }, [channel, isActive, proxyUrl, destroyHls, onError, onReady, muted]);
 
-  // Init/destroy on active state change
   useEffect(() => {
     if (isActive) {
       initPlayer();
@@ -164,15 +217,124 @@ export default function ChannelPlayer({
     };
   }, [isActive, initPlayer, destroyHls]);
 
-  // Sync muted state
   useEffect(() => {
     if (videoRef.current) {
       videoRef.current.muted = muted;
     }
   }, [muted]);
 
+  // Touch Gesture Handlers
+  const handleTouchStart = (e: React.TouchEvent<HTMLDivElement>) => {
+    const video = videoRef.current;
+    if (!video || !isActive || loading || errorMsg) return;
+
+    const touch = e.touches[0];
+    touchStartRef.current = {
+      x: touch.clientX,
+      y: touch.clientY,
+      vol: video.muted ? 0 : video.volume,
+      time: video.currentTime,
+    };
+    gestureTypeRef.current = null;
+  };
+
+  const handleTouchMove = (e: React.TouchEvent<HTMLDivElement>) => {
+    const video = videoRef.current;
+    const start = touchStartRef.current;
+    if (!video || !start) return;
+
+    const touch = e.touches[0];
+    const dx = touch.clientX - start.x;
+    const dy = touch.clientY - start.y;
+
+    // Detect gesture type if not set yet
+    if (!gestureTypeRef.current) {
+      const absX = Math.abs(dx);
+      const absY = Math.abs(dy);
+      if (absX > 15 || absY > 15) {
+        if (absX > absY) {
+          gestureTypeRef.current = 'seek';
+        } else {
+          gestureTypeRef.current = 'volume';
+        }
+      }
+    }
+
+    // Process gesture
+    if (gestureTypeRef.current === 'volume') {
+      if (e.cancelable) e.preventDefault();
+      // Swipe up increases volume, swipe down decreases. Sensitivity: 200px drag for 0-100%
+      const volumeChange = -dy / 200;
+      let newVol = Math.max(0, Math.min(1, start.vol + volumeChange));
+      video.volume = newVol;
+      if (newVol > 0 && video.muted) {
+        video.muted = false;
+        // Notify parent if parent state tracks muted
+        if (muted) {
+          onToggleMute();
+        }
+      }
+      setHudVolume(Math.round(newVol * 100));
+      setHudSeekDelta(null);
+    } else if (gestureTypeRef.current === 'seek') {
+      if (e.cancelable) e.preventDefault();
+      
+      if (isLive) {
+        // Live feedback
+        setHudSeekDelta(dx > 0 ? 1 : -1);
+        setHudSeekTarget('LIVE');
+        setHudVolume(null);
+      } else {
+        const duration = video.duration;
+        if (duration && isFinite(duration)) {
+          // Drag 300px for 90s seek
+          const seekChange = (dx / 300) * 90;
+          let targetTime = Math.max(0, Math.min(duration, start.time + seekChange));
+          const delta = Math.round(targetTime - start.time);
+          
+          setHudSeekDelta(delta);
+          setHudSeekTarget(formatTime(targetTime));
+          setHudVolume(null);
+        }
+      }
+    }
+  };
+
+  const handleTouchEnd = () => {
+    const video = videoRef.current;
+    const start = touchStartRef.current;
+    
+    if (video && start) {
+      if (gestureTypeRef.current === 'seek' && !isLive) {
+        const duration = video.duration;
+        if (duration && isFinite(duration) && hudSeekDelta !== null) {
+          video.currentTime = Math.max(0, Math.min(duration, start.time + hudSeekDelta));
+        }
+      } else if (gestureTypeRef.current === 'volume') {
+        localStorage.setItem('amadeus_player_volume', video.volume.toString());
+        localStorage.setItem('amadeus_player_muted', video.muted ? 'true' : 'false');
+      }
+    }
+
+    // Reset touch trackers
+    touchStartRef.current = null;
+    gestureTypeRef.current = null;
+
+    // Fade out HUD slowly
+    setTimeout(() => {
+      setHudVolume(null);
+      setHudSeekDelta(null);
+      setHudSeekTarget(null);
+    }, 600);
+  };
+
   return (
-    <div className="player-container">
+    <div 
+      className="player-container"
+      onTouchStart={handleTouchStart}
+      onTouchMove={handleTouchMove}
+      onTouchEnd={handleTouchEnd}
+    >
       <video
         ref={videoRef}
         className="player-video"
@@ -185,9 +347,16 @@ export default function ChannelPlayer({
 
       {/* Loading overlay */}
       {loading && isActive && !errorMsg && (
-        <div className="player-overlay-center">
+        <div className="player-overlay-center player-loading-bg">
           <div className="loading-spinner" />
           <p className="loading-text">Подключение...</p>
+        </div>
+      )}
+
+      {/* Buffering overlay (transparent) */}
+      {buffering && !loading && isActive && !errorMsg && (
+        <div className="player-overlay-center player-buffering-bg">
+          <div className="loading-spinner" />
         </div>
       )}
 
@@ -197,6 +366,28 @@ export default function ChannelPlayer({
           <div className="error-icon">⚠️</div>
           <p className="error-text">{errorMsg}</p>
           <p className="error-subtext">Переключение...</p>
+        </div>
+      )}
+
+      {/* Volume Gesture HUD */}
+      {hudVolume !== null && (
+        <div className="player-hud">
+          <div className="player-hud-icon">{hudVolume === 0 ? '🔇' : hudVolume > 50 ? '🔊' : '🔉'}</div>
+          <div className="player-hud-text">{hudVolume}%</div>
+          <div className="player-hud-bar">
+            <div className="player-hud-bar-fill" style={{ width: `${hudVolume}%` }} />
+          </div>
+        </div>
+      )}
+
+      {/* Seek Gesture HUD */}
+      {hudSeekDelta !== null && (
+        <div className="player-hud">
+          <div className="player-hud-icon">{hudSeekDelta >= 0 ? '⏩' : '⏪'}</div>
+          <div className="player-hud-text">
+            {hudSeekDelta > 0 ? `+${hudSeekDelta}s` : hudSeekDelta < 0 ? `${hudSeekDelta}s` : ''}
+          </div>
+          {hudSeekTarget && <div className="player-hud-subtext">{hudSeekTarget}</div>}
         </div>
       )}
 
@@ -220,16 +411,31 @@ function getErrorMessage(data: ErrorData): string {
     case 'manifestLoadTimeOut':
       return 'Канал недоступен';
     case 'manifestParsingError':
-      return 'Ошибка формата';
+      return 'Ошибка формата плейлиста';
     case 'levelLoadError':
     case 'levelLoadTimeOut':
-      return 'Потеря соединения';
+      return 'Потеря соединения со стримом';
     case 'fragLoadError':
-      return 'Ошибка загрузки';
+      return 'Ошибка загрузки сегмента';
     default:
       if (data.response && (data.response as { code?: number }).code === 403) {
         return 'Гео-блокировка (403)';
       }
       return 'Стрим недоступен';
   }
+}
+
+function formatTime(seconds: number): string {
+  if (isNaN(seconds)) return '00:00';
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = Math.floor(seconds % 60);
+
+  const mm = m < 10 ? `0${m}` : m;
+  const ss = s < 10 ? `0${s}` : s;
+
+  if (h > 0) {
+    return `${h}:${mm}:${ss}`;
+  }
+  return `${mm}:${ss}`;
 }
