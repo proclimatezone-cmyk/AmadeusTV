@@ -35,16 +35,8 @@ export const STRIP_HEADERS = ['origin', 'referer', 'sec-fetch-dest', 'sec-fetch-
 
 /**
  * Get proxy request headers for a given URL.
- * Tries VLC first, falls back to Smart TV headers for certain domains.
+ * Emulates Smart TV headers by default to bypass most CDN and broadcaster blocks (like Fastly, Cloudfront).
  */
 export function getProxyHeaders(targetUrl?: string): Record<string, string> {
-  // Some broadcasters block VLC but allow Smart TVs
-  if (targetUrl) {
-    const url = new URL(targetUrl);
-    const smartTvDomains = ['youtube.com', 'googlevideo.com', 'twitch.tv'];
-    if (smartTvDomains.some(d => url.hostname.includes(d))) {
-      return { ...SMART_TV_HEADERS };
-    }
-  }
-  return { ...VLC_HEADERS };
+  return { ...SMART_TV_HEADERS };
 }

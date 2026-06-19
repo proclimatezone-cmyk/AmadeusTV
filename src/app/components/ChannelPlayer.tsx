@@ -105,7 +105,19 @@ export default function ChannelPlayer({
   const handleFullscreen = () => {
     const container = containerRef.current;
     const video = videoRef.current;
-    if (!container) return;
+    if (!container || !video) return;
+
+    // Detect iOS (iPhone/iPad) to immediately invoke native video fullscreen
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !(window as any).MSStream;
+
+    if (isIOS && typeof (video as any).webkitEnterFullscreen === 'function') {
+      try {
+        (video as any).webkitEnterFullscreen();
+        return;
+      } catch (err) {
+        console.error('[Player] iOS webkitEnterFullscreen failed:', err);
+      }
+    }
 
     const isFullscreen = document.fullscreenElement || 
                          (document as any).webkitFullscreenElement || 
@@ -126,12 +138,18 @@ export default function ChannelPlayer({
       if (container.requestFullscreen) {
         container.requestFullscreen().catch(() => {});
       } else if ((container as any).webkitRequestFullscreen) {
-        (container as any).webkitRequestFullscreen();
+        try {
+          (container as any).webkitRequestFullscreen();
+        } catch {
+          if (typeof (video as any).webkitEnterFullscreen === 'function') {
+            (video as any).webkitEnterFullscreen();
+          }
+        }
       } else if ((container as any).mozRequestFullScreen) {
         (container as any).mozRequestFullScreen();
       } else if ((container as any).msRequestFullscreen) {
         (container as any).msRequestFullscreen();
-      } else if (video && (video as any).webkitEnterFullscreen) {
+      } else if (typeof (video as any).webkitEnterFullscreen === 'function') {
         try {
           (video as any).webkitEnterFullscreen();
         } catch (err) {

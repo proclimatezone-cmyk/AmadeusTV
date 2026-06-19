@@ -46,7 +46,7 @@ export default function ChannelFeed({ initialChannels, categories }: ChannelFeed
   const [searchOpen, setSearchOpen] = useState(false);
   
   // Iteration 3 & 4 states
-  const [autoSwitch, setAutoSwitch] = useState(false);
+  const [autoSwitch, setAutoSwitch] = useState(true);
   const [forceProxy, setForceProxy] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
   const [sidebarHidden, setSidebarHidden] = useState(false);
