@@ -178,11 +178,6 @@ function rewriteManifest(manifest: string, baseUrl: string, proxyBaseUrl: string
   const lines = manifest.split('\n');
   const rewritten: string[] = [];
 
-  const isManifestLink = (link: string) => {
-    const clean = link.split('?')[0].split('#')[0].toLowerCase();
-    return clean.endsWith('.m3u8') || clean.endsWith('.m3u');
-  };
-
   for (const line of lines) {
     const trimmed = line.trim();
 
@@ -191,16 +186,10 @@ function rewriteManifest(manifest: string, baseUrl: string, proxyBaseUrl: string
       if (trimmed.includes('URI="')) {
         const rewrittenLine = trimmed.replace(/URI="([^"]+)"/g, (match, uri) => {
           if (uri.startsWith('http://') || uri.startsWith('https://')) {
-            if (isManifestLink(uri)) {
-              return `URI="${proxyBase}?url=${encodeURIComponent(uri)}"`;
-            }
-            return `URI="${uri}"`;
+            return `URI="${proxyBase}?url=${encodeURIComponent(uri)}"`;
           }
           const absoluteUri = new URL(uri, basePath).href;
-          if (isManifestLink(absoluteUri)) {
-            return `URI="${proxyBase}?url=${encodeURIComponent(absoluteUri)}"`;
-          }
-          return `URI="${absoluteUri}"`;
+          return `URI="${proxyBase}?url=${encodeURIComponent(absoluteUri)}"`;
         });
         rewritten.push(rewrittenLine);
       } else {
@@ -209,20 +198,12 @@ function rewriteManifest(manifest: string, baseUrl: string, proxyBaseUrl: string
       continue;
     }
 
-    // Rewrite HLS links
+    // Rewrite HLS links (both sub-manifests and TS segments) to flow through our CORS-enabled proxy
     if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
-      if (isManifestLink(trimmed)) {
-        rewritten.push(`${proxyBase}?url=${encodeURIComponent(trimmed)}`);
-      } else {
-        rewritten.push(trimmed);
-      }
+      rewritten.push(`${proxyBase}?url=${encodeURIComponent(trimmed)}`);
     } else {
       const absoluteUrl = new URL(trimmed, basePath).href;
-      if (isManifestLink(trimmed)) {
-        rewritten.push(`${proxyBase}?url=${encodeURIComponent(absoluteUrl)}`);
-      } else {
-        rewritten.push(absoluteUrl);
-      }
+      rewritten.push(`${proxyBase}?url=${encodeURIComponent(absoluteUrl)}`);
     }
   }
 
